@@ -3,10 +3,10 @@
 Markdown reader/writer. Single-file Deno server, zero deps.
 
 ```
-deno run --allow-net --allow-read --allow-write --allow-env mdmaster.ts [directory]
+deno run --allow-net --allow-read --allow-write --allow-env piranesi.ts [directory]
 ```
 
-Defaults to `working_data/narrative/`. Opens on port 8888.
+Defaults to `working_data/` on port 8888.
 
 ## Features
 
