@@ -4,7 +4,7 @@
  * Single-file Deno server. Preact+htm client via CDN. Zero deps.
  *
  * Usage: deno run --allow-net --allow-read --allow-write mdmaster.ts [directory]
- *        Defaults to working_data/narrative/
+ *        Defaults to working_data/
  */
 
 import { resolve, join, extname, basename, dirname } from "https://deno.land/std@0.224.0/path/mod.ts";
@@ -12,7 +12,7 @@ import { resolve, join, extname, basename, dirname } from "https://deno.land/std
 // ── Config ──────────────────────────────────────────────────────────────────────
 
 const PREFERRED_PORT = parseInt(Deno.env.get("PORT") || "8888");
-const BASE_DIR = resolve(Deno.args[0] || "working_data/narrative");
+const BASE_DIR = resolve(Deno.args[0] || "working_data/");
 
 // ── MIME types ───────────────────────────────────────────────────────────────────
 
