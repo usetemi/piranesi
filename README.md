@@ -1,4 +1,4 @@
-# mdmaster
+# piranesi
 
 Markdown reader/writer. Single-file Deno server, zero deps.
 
