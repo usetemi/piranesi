@@ -1,6 +1,11 @@
 # piranesi
 
-Markdown reader/writer. Single-file Deno server, zero deps.
+AI-first filesystem-backed markdown reader/writer for published prose. No DBs.
+
+
+## Usage
+
+Single-file Deno server, zero dependencies.
 
 ```
 deno run --allow-net --allow-read --allow-write --allow-env piranesi.ts [directory]
@@ -10,8 +15,6 @@ Defaults to `working_data/` on port 8888.
 
 ## Features
 
-- Read / Raw / Formatted editing modes
-- CodeMirror source editor + WYSIWYG (Turndown round-trip)
-- Annotations with color-coded highlights and comments
-- Editorial typography (Lora + Inter, drop caps, oldstyle numerals)
-- Dark mode, TOC sidebar, scroll progress, expandable tables, footnotes
+- Read / Annotation mode + Raw / Formatted(WYSIWYG) editing mode
+- AI-first annotations
+- Optimized for readability and AI-writing workflows
