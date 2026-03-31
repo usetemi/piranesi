@@ -375,8 +375,9 @@ const ANNOTATION_CSS = `
 }
 .note-input-section textarea:disabled { opacity: 0.4; cursor: default; }
 .note-input-section textarea:focus { outline: none; border-color: var(--accent); }
-.note-save-status { font-size: 0.68rem; color: var(--fg3); transition: opacity 0.3s; }
-.note-save-status.dirty { color: var(--accent); }
+.note-save-status { font-size: 0.68rem; color: var(--fg3); min-height: 1rem; display: block; transition: opacity 1.5s ease; opacity: 1; }
+.note-save-status.dirty { color: var(--accent); transition: none; }
+.note-save-status.fading { opacity: 0; }
 /* Note list */
 .note-list { display: flex; flex-direction: column; gap: 0.35rem; }
 .note-list-title { font-weight: 600; color: var(--fg3); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.6rem; margin-bottom: 0.25rem; }
@@ -1194,12 +1195,15 @@ function FormattedEditor({ markdown, notes, onDirty }) {
     style="display:block" onInput=\${onDirty}></article>\`;
 }
 
-function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEditing, onSelTextChange }) {
+function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEditing, onSelTextChange, onNoteCreated }) {
   const [comment, setComment] = useState('');
   const [selText, setSelText] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
+  const [fading, setFading] = useState(false);
   const textareaRef = useRef(null);
   const saveTimerRef = useRef(null);
+  const statusTimerRef = useRef(null);
+  const fadeTimerRef = useRef(null);
   const selTextRef = useRef('');
   const editingRef = useLatest(editingNote);
   const onClearEditingRef = useLatest(onClearEditing);
@@ -1246,6 +1250,7 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
     const onMouseUp = (e) => {
       setTimeout(() => {
         if (e.target.closest && e.target.closest('.note-input-section')) return;
+        if (e.target.closest && e.target.closest('.notes-sidebar')) return;
 
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
@@ -1263,12 +1268,11 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
             return;
           }
         }
-        // Clicked outside prose without valid selection
-        if (!editingRef.current) {
-          removePendingHighlights();
-          setSelText('');
-          setComment('');
-        }
+        // Clicked outside prose/sidebar without valid selection → deselect note
+        if (editingRef.current) onClearEditingRef.current();
+        removePendingHighlights();
+        setSelText('');
+        setComment('');
       }, 50);
     };
     document.addEventListener('mouseup', onMouseUp);
@@ -1276,34 +1280,46 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
   }, []);
 
   // Autosave: debounce 800ms after typing
+  const flashStatus = useCallback((msg) => {
+    setSaveStatus(msg);
+    setFading(false);
+    clearTimeout(statusTimerRef.current);
+    clearTimeout(fadeTimerRef.current);
+    // Start fading after a brief pause
+    statusTimerRef.current = setTimeout(() => setFading(true), 600);
+    // Clear text after fade completes
+    fadeTimerRef.current = setTimeout(() => { setSaveStatus(''); setFading(false); }, 2200);
+  }, []);
+
   const handleInput = useCallback((e) => {
     const val = e.target.value;
     setComment(val);
     autoResize(e.target);
     clearTimeout(saveTimerRef.current);
+    clearTimeout(statusTimerRef.current);
+    clearTimeout(fadeTimerRef.current);
+    setFading(false);
     if (val.trim()) setSaveStatus('Unsaved');
     else { setSaveStatus(''); return; }
 
-    saveTimerRef.current = setTimeout(() => {
+    saveTimerRef.current = setTimeout(async () => {
       const editing = editingRef.current;
       if (editing) {
         onUpdate(editing.id, val.trim());
-        setSaveStatus('Saved');
+        flashStatus('Saved');
       } else {
         const text = selTextRef.current;
         if (!text || !text.trim()) return;
         removePendingHighlights();
-        onAdd(text.replace(/\\s+/g, ' ').trim(), val.trim());
-        setSaveStatus('Note created');
-        setComment('');
-        setSelText('');
-        if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
+        const newNote = await onAdd(text.replace(/\\s+/g, ' ').trim(), val.trim());
+        flashStatus('Note created');
+        if (newNote && onNoteCreated) onNoteCreated(newNote.id);
       }
     }, 800);
-  }, [onAdd, onUpdate, autoResize]);
+  }, [onAdd, onUpdate, autoResize, flashStatus]);
 
-  // Clean up timer
-  useEffect(() => () => clearTimeout(saveTimerRef.current), []);
+  // Clean up timers
+  useEffect(() => () => { clearTimeout(saveTimerRef.current); clearTimeout(statusTimerRef.current); clearTimeout(fadeTimerRef.current); }, []);
 
   const quoteText = editingNote ? editingNote.text : selText;
   const hasContext = quoteText && quoteText.trim().length > 0;
@@ -1317,7 +1333,7 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
         disabled=\${!hasContext}
         onInput=\${handleInput}
       ></textarea>
-      \${saveStatus ? html\`<span class=\${'note-save-status' + (saveStatus === 'Unsaved' ? ' dirty' : '')}>\${saveStatus}</span>\` : null}
+      <span class=\${'note-save-status' + (saveStatus === 'Unsaved' ? ' dirty' : '') + (fading ? ' fading' : '')}>\${saveStatus || '\\u00A0'}</span>
     </div>\`;
 }
 
@@ -1384,6 +1400,10 @@ function NotesSidebar({ notes, onAdd, onUpdate, onResolve, onDelete, mode, onNot
     clearActiveHighlights();
   }, []);
 
+  const handleNoteCreated = useCallback((noteId) => {
+    setEditingNoteId(noteId);
+  }, []);
+
   if (mode !== 'read' && mode !== 'formatted') return null;
   const editingNote = !isViewOnly && editingNoteId ? notes.find(n => n.id === editingNoteId) : null;
   const openNotes = notes.filter(n => !n.resolved);
@@ -1398,7 +1418,7 @@ function NotesSidebar({ notes, onAdd, onUpdate, onResolve, onDelete, mode, onNot
       <div class="notes-body">
         \${!isViewOnly ? html\`<\${NoteInput} onAdd=\${onAdd} onUpdate=\${onUpdate} onSelectionActive=\${handleSelectionActive}
           editingNote=\${editingNote} onClearEditing=\${handleClearEditing}
-          onSelTextChange=\${handleSelTextChange} />\` : null}
+          onSelTextChange=\${handleSelTextChange} onNoteCreated=\${handleNoteCreated} />\` : null}
         \${openNotes.length || resolvedNotes.length ? html\`
           <div class="note-list">
             \${openNotes.length ? html\`<div class="note-list-title">Open (\${openNotes.length})</div>\` : null}
@@ -1586,7 +1606,7 @@ function DocApp() {
 
   // Note actions — bump renderVersion to re-apply highlights
   const rerender = () => setRenderVersion(v => v + 1);
-  const handleAddNote = useCallback(async (text, comment) => { await addNote(text, comment); rerender(); }, [addNote]);
+  const handleAddNote = useCallback(async (text, comment) => { const n = await addNote(text, comment); rerender(); return n; }, [addNote]);
   const handleResolve = useCallback(async (id) => { await resolveNote(id); rerender(); }, [resolveNote]);
   const handleDelete = useCallback(async (id) => { await deleteNote(id); rerender(); }, [deleteNote]);
   const handleUpdate = useCallback(async (id, comment) => { await updateNote(id, comment); }, [updateNote]);
