@@ -13,6 +13,7 @@ import { resolve, join, extname, basename, dirname } from "https://deno.land/std
 
 const PREFERRED_PORT = parseInt(Deno.env.get("PORT") || "8888");
 const BASE_DIR = resolve(Deno.args[0] || "working_data/");
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
 // ── MIME types ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ const PROSE_CSS = `
 }
 .prose pre code { background: none; border: none; padding: 0; font-size: 0.82rem; }
 .prose hr { border: none; height: 1px; background: var(--hr); margin: 2rem 0; }
+.prose .eval-result {
+  font-weight: 600; color: var(--accent); cursor: help;
+  border-bottom: 1px dashed var(--accent); font-variant-numeric: tabular-nums lining-nums;
+}
 .prose .table-wrap { position: relative; margin: 1rem 0; overflow-x: auto; transition: width 0.2s, margin-left 0.2s; }
 .prose .table-wrap table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0; }
 .prose .table-wrap.expanded {
@@ -126,6 +131,21 @@ const PROSE_CSS = `
 /* Footnotes */
 .prose .footnote-ref { font-size: 0.75em; text-decoration: none; color: var(--accent); font-weight: 600; }
 .prose .footnote-ref:hover { text-decoration: underline; }
+.prose .footnote-tooltip {
+  display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  background: #1c1917; color: #f5f5f4; padding: 0.5rem 0.75rem; border-radius: 8px;
+  font-size: 0.78rem; line-height: 1.5; width: max-content; max-width: 320px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 50; pointer-events: none;
+  margin-bottom: 6px; font-weight: 400; text-align: left; white-space: normal;
+}
+.prose .footnote-tooltip p { margin: 0; }
+.prose .footnote-tooltip::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #1c1917;
+}
+.prose sup:hover .footnote-tooltip { display: block; }
+[data-theme="dark"] .prose .footnote-tooltip { background: #292524; color: #e7e5e4; }
+[data-theme="dark"] .prose .footnote-tooltip::after { border-top-color: #292524; }
 .prose sup { line-height: 0; position: relative; }
 .prose sup::after {
   content: ''; position: absolute; inset: -2px -4px;
@@ -375,7 +395,7 @@ const ANNOTATION_CSS = `
 }
 .note-input-section textarea:disabled { opacity: 0.4; cursor: default; }
 .note-input-section textarea:focus { outline: none; border-color: var(--accent); }
-.note-save-status { font-size: 0.68rem; color: var(--fg3); min-height: 1rem; display: block; transition: opacity 1.5s ease; opacity: 1; }
+.note-save-status { font-size: 0.68rem; color: var(--fg3); height: 1rem; line-height: 1rem; display: block; transition: opacity 1.5s ease; opacity: 1; overflow: hidden; }
 .note-save-status.dirty { color: var(--accent); transition: none; }
 .note-save-status.fading { opacity: 0; }
 /* Note list */
@@ -433,6 +453,70 @@ const INDEX_CSS = `
 .file-meta-cell { color: var(--fg2); font-size: 0.82rem; white-space: nowrap; }
 `;
 
+const CHAT_CSS = `
+.chat-toggle {
+  position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 90;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+  font-size: 1.2rem; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: transform 0.15s;
+}
+.chat-toggle:hover { transform: scale(1.08); }
+.chat-panel {
+  position: fixed; bottom: 4.5rem; right: 1.5rem; z-index: 90;
+  width: 360px; max-height: 500px; display: flex; flex-direction: column;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12); overflow: hidden;
+}
+.chat-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border);
+}
+.chat-header span { font-weight: 600; font-size: 0.8rem; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.08em; }
+.chat-header button {
+  background: none; border: none; cursor: pointer; color: var(--fg3); font-size: 0.75rem;
+}
+.chat-header button:hover { color: var(--fg); }
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem;
+  min-height: 200px; max-height: 380px;
+}
+.chat-messages::-webkit-scrollbar { width: 3px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.chat-msg {
+  font-size: 0.82rem; line-height: 1.5; padding: 0.5rem 0.7rem;
+  border-radius: 10px; max-width: 88%; word-break: break-word; white-space: pre-wrap;
+}
+.chat-msg.user {
+  align-self: flex-end; background: var(--accent); color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.chat-msg.assistant {
+  align-self: flex-start; background: var(--code-bg); color: var(--fg);
+  border-bottom-left-radius: 3px;
+}
+.chat-msg.assistant p { margin: 0 0 0.4rem; }
+.chat-msg.assistant p:last-child { margin-bottom: 0; }
+.chat-msg.assistant code { background: var(--border); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.78rem; }
+.chat-input-row {
+  display: flex; gap: 0.4rem; padding: 0.6rem 0.75rem; border-top: 1px solid var(--border);
+}
+.chat-input-row input {
+  flex: 1; border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.4rem 0.6rem; font-size: 0.82rem; font-family: inherit;
+  background: var(--bg); color: var(--fg); outline: none;
+}
+.chat-input-row input:focus { border-color: var(--accent); }
+.chat-input-row button {
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 0.4rem 0.7rem; font-size: 0.78rem; cursor: pointer; font-weight: 500;
+  white-space: nowrap;
+}
+.chat-input-row button:disabled { opacity: 0.4; cursor: default; }
+.chat-empty { color: var(--fg3); font-size: 0.78rem; text-align: center; padding: 2rem 1rem; }
+.chat-error { color: #dc2626; font-size: 0.75rem; padding: 0.3rem 0.7rem; }
+`;
+
 const RESPONSIVE_CSS = `
 @media (max-width: 1100px) {
   .notes-sidebar {
@@ -449,7 +533,7 @@ const RESPONSIVE_CSS = `
 }
 `;
 
-const ALL_CSS = THEME_CSS + PROSE_CSS + LAYOUT_CSS + EDITOR_CSS + ANNOTATION_CSS + INDEX_CSS + RESPONSIVE_CSS;
+const ALL_CSS = THEME_CSS + PROSE_CSS + LAYOUT_CSS + EDITOR_CSS + ANNOTATION_CSS + INDEX_CSS + CHAT_CSS + RESPONSIVE_CSS;
 
 // ── Page builders ───────────────────────────────────────────────────────────────
 
@@ -569,6 +653,137 @@ render(html\`<\${IndexApp} />\`, document.getElementById('app'));
 </script>`);
 }
 
+function dirPage(relDir: string, entries: DirEntry[]): string {
+  const label = basename(BASE_DIR);
+  const entriesJson = JSON.stringify(entries);
+  const segments = relDir.split("/").filter(Boolean);
+  // Build breadcrumb: [{ name, href }] starting with the root.
+  const crumbs: { name: string; href: string }[] = [{ name: label, href: "/" }];
+  let acc = "";
+  for (const seg of segments) {
+    acc = acc ? acc + "/" + seg : seg;
+    crumbs.push({ name: seg, href: "/doc/" + acc + "/" });
+  }
+  const crumbsJson = JSON.stringify(crumbs);
+  const titleStr = relDir ? `${label} / ${relDir}` : label;
+  return shell(`mdmaster / ${titleStr}`, ALL_CSS, `
+<div id="app"></div>
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10';
+import { useState, useEffect, useCallback, useMemo } from 'https://esm.sh/preact@10/hooks';
+import htm from 'https://esm.sh/htm@3';
+const html = htm.bind(h);
+
+const ENTRIES = ${entriesJson};
+const CRUMBS = ${crumbsJson};
+
+function useTheme() {
+  const [theme, setThemeState] = useState(() => {
+    const s = localStorage.getItem('mdmaster-theme');
+    if (s) return s;
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    return 'light';
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('mdmaster-theme', theme);
+  }, [theme]);
+  const toggle = useCallback(() => setThemeState(t => t === 'dark' ? 'light' : 'dark'), []);
+  return { theme, toggle };
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19'}</button>\`;
+}
+
+function DirTable({ entries, sortCol, sortDir, onSort }) {
+  const arrow = (col) => sortCol === col ? (sortDir === 1 ? '\\u25B2' : '\\u25BC') : '';
+  return html\`
+    <table class="file-table">
+      <thead>
+        <tr>
+          <th onClick=\${() => onSort('name')}>Name <span class="sort-arrow">\${arrow('name')}</span></th>
+          <th onClick=\${() => onSort('modified')}>Modified <span class="sort-arrow">\${arrow('modified')}</span></th>
+          <th onClick=\${() => onSort('read')}>Read <span class="sort-arrow">\${arrow('read')}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        \${entries.map(e => {
+          const d = e.mtime ? new Date(e.mtime * 1000) : null;
+          const ds = d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+          if (e.kind === 'dir') {
+            return html\`
+              <tr key=\${'d:' + e.rel}>
+                <td><a href=\${'/doc/' + e.rel + '/'}>\${'\\uD83D\\uDCC1 ' + e.name}</a></td>
+                <td class="file-meta-cell">\${ds}</td>
+                <td class="file-meta-cell">—</td>
+              </tr>\`;
+          }
+          return html\`
+            <tr key=\${'f:' + e.rel}>
+              <td><a href=\${'/doc/' + e.rel}>\${e.name}</a></td>
+              <td class="file-meta-cell">\${ds}</td>
+              <td class="file-meta-cell">\${e.mins} min</td>
+            </tr>\`;
+        })}
+      </tbody>
+    </table>\`;
+}
+
+function Breadcrumbs({ crumbs }) {
+  return html\`
+    <h1>mdmaster <span>/ \${crumbs.map((c, i) => {
+      const isLast = i === crumbs.length - 1;
+      return html\`<\${isLast ? 'span' : 'a'} href=\${c.href}>\${c.name}\</\${isLast ? 'span' : 'a'}>\${isLast ? '' : ' / '}\`;
+    })}</span></h1>\`;
+}
+
+function DirApp() {
+  const { theme, toggle } = useTheme();
+  const [sortCol, setSortCol] = useState('name');
+  const [sortDir, setSortDir] = useState(1);
+
+  const handleSort = useCallback((col) => {
+    setSortCol(prev => {
+      if (prev === col) { setSortDir(d => d * -1); return col; }
+      setSortDir(col === 'modified' ? -1 : 1);
+      return col;
+    });
+  }, []);
+
+  const sorted = useMemo(() => {
+    // Always keep directories before files, then sort within each group.
+    const dirs = ENTRIES.filter(e => e.kind === 'dir').slice();
+    const files = ENTRIES.filter(e => e.kind === 'file').slice();
+    const cmp = (a, b) => {
+      let v;
+      if (sortCol === 'name') v = a.name.localeCompare(b.name);
+      else if (sortCol === 'modified') v = (a.mtime || 0) - (b.mtime || 0);
+      else if (sortCol === 'read') v = ((a.mins || 0) - (b.mins || 0));
+      return v * sortDir;
+    };
+    dirs.sort(cmp);
+    files.sort(cmp);
+    return [...dirs, ...files];
+  }, [sortCol, sortDir]);
+
+  return html\`
+    <div class="index-container">
+      <header class="index-header">
+        <\${Breadcrumbs} crumbs=\${CRUMBS} />
+        <div class="header-controls">
+          <a class="new-btn" href="/new">+ New</a>
+          <\${ThemeToggle} theme=\${theme} onToggle=\${toggle} />
+        </div>
+      </header>
+      <\${DirTable} entries=\${sorted} sortCol=\${sortCol} sortDir=\${sortDir} onSort=\${handleSort} />
+    </div>\`;
+}
+
+render(html\`<\${DirApp} />\`, document.getElementById('app'));
+</script>`);
+}
+
 function docPage(title: string, filePath: string): string {
   return shell(`${esc(title)} \u2014 mdmaster`, ALL_CSS, `
 <div id="app"></div>
@@ -606,6 +821,40 @@ const IS_NEW = FILE_PATH === '__new__';
 // ── marked setup (once) ──
 marked.setOptions({ gfm: true, breaks: false });
 marked.use(markedFootnote());
+
+// Inline evaluated expressions: \`= expr\` → computed result
+// Supports: +, -, *, /, ^, %, parens, pi, e,
+//   sqrt, abs, ceil, floor, round, min, max, log, log2, log10, sin, cos, tan, pow
+const MATH_NAMES = ['pi','e','sqrt','abs','ceil','floor','round','min','max','log','log2','log10','sin','cos','tan','pow'];
+const MATH_VALS = [Math.PI,Math.E,Math.sqrt,Math.abs,Math.ceil,Math.floor,Math.round,Math.min,Math.max,Math.log,Math.log2,Math.log10,Math.sin,Math.cos,Math.tan,Math.pow];
+
+function evalMathExpr(expr) {
+  try {
+    const s = expr.trim();
+    if (!/^[\\d\\s+\\-*/().,%^a-z_]+$/i.test(s)) return null;
+    if (/\\b(var|let|const|function|return|this|window|document|eval|import|require|fetch|new)\\b/.test(s)) return null;
+    const fn = new Function(...MATH_NAMES, 'return (' + s.replace(/\\^/g, '**') + ')');
+    const result = fn(...MATH_VALS);
+    if (typeof result !== 'number' || !isFinite(result)) return null;
+    return parseFloat(result.toPrecision(10)).toString();
+  } catch { return null; }
+}
+
+marked.use({
+  renderer: {
+    codespan(token) {
+      const text = typeof token === 'object' ? token.text : token;
+      if (text.startsWith('= ')) {
+        const result = evalMathExpr(text.slice(2));
+        if (result !== null) {
+          const title = text.slice(2).replace(/"/g, '&quot;');
+          return '<span class="eval-result" title="' + title + '">' + result + '</span>';
+        }
+      }
+      return '<code>' + text + '</code>';
+    }
+  }
+});
 
 // ── Annotation color palette ──
 const ANNOTATION_COLORS = {
@@ -711,30 +960,44 @@ function wireFootnotes(container) {
     while (section.nextSibling) section.appendChild(section.nextSibling);
     section.querySelectorAll('ol > li').forEach(li => li.classList.add('fn-item'));
   }
-  container.querySelectorAll('a').forEach(a => {
-    const href = a.getAttribute('href');
-    if (!href) return;
-    const refMatch = href.match(/^#footnote-(\\d+)$/);
-    if (refMatch) {
-      a.id = 'footnote-ref-' + refMatch[1];
-      a.classList.add('footnote-ref');
-      if (a.parentNode.tagName !== 'SUP') {
-        const sup = document.createElement('sup');
-        a.parentNode.insertBefore(sup, a);
-        sup.appendChild(a);
-      }
-      return;
+  // Wire footnote refs: add class, ensure sup wrap, attach tooltip
+  container.querySelectorAll('a[data-footnote-ref]').forEach(a => {
+    a.classList.add('footnote-ref');
+    if (a.parentNode.tagName !== 'SUP') {
+      const sup = document.createElement('sup');
+      a.parentNode.insertBefore(sup, a);
+      sup.appendChild(a);
     }
-    const backMatch = href.match(/^#footnote-ref-(\\d+)$/);
-    if (backMatch) {
-      a.id = 'footnote-' + backMatch[1];
-      a.classList.add('footnote-back');
+    // Hover tooltip
+    const href = a.getAttribute('href');
+    if (href) {
+      const fnLi = container.querySelector(href);
+      if (fnLi) {
+        const tip = document.createElement('div');
+        tip.className = 'footnote-tooltip';
+        const clone = fnLi.cloneNode(true);
+        clone.querySelectorAll('[data-footnote-backref]').forEach(b => b.remove());
+        tip.innerHTML = clone.innerHTML;
+        const sup = a.closest('sup');
+        if (sup) sup.appendChild(tip); else a.parentNode.appendChild(tip);
+      }
     }
   });
-  container.querySelectorAll('a[href^="#footnote"]').forEach(a => {
+  // Smooth-scroll all footnote links (both directions)
+  container.querySelectorAll('a[data-footnote-ref], a[data-footnote-backref]').forEach(a => {
     a.addEventListener('click', e => {
-      const target = document.querySelector(a.getAttribute('href'));
-      if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      const href = a.getAttribute('href');
+      if (!href) return;
+      const target = document.querySelector(href);
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Brief highlight on the target
+        target.style.outline = '2px solid var(--accent)';
+        target.style.outlineOffset = '4px';
+        target.style.borderRadius = '4px';
+        setTimeout(() => { target.style.outline = ''; target.style.outlineOffset = ''; }, 2000);
+      }
     });
   });
 }
@@ -842,6 +1105,10 @@ function htmlToMarkdown(el) {
       filter: node => node.nodeName === 'SPAN' && node.classList.contains('annotated'),
       replacement: content => content
     });
+    tdInstance.addRule('evalResult', {
+      filter: node => node.nodeName === 'SPAN' && node.classList.contains('eval-result'),
+      replacement: (content, node) => '\x60= ' + (node.getAttribute('title') || content) + '\x60'
+    });
     tdInstance.addRule('relativeImages', {
       filter: node => node.nodeName === 'IMG' && node.getAttribute('src') && node.getAttribute('src').startsWith('/static/'),
       replacement: (content, node) => {
@@ -921,23 +1188,41 @@ function useConflictDetection(pathRef, mtimeRef, onConflict) {
 function useNotes(filePath) {
   const [notes, setNotes] = useState([]);
   const savedPathRef = useRef(IS_NEW ? null : filePath);
+  // notesRef mirrors latest committed mutation result (synchronously updated)
+  // so that all writers see the latest list and don't race using stale closures.
+  const notesRef = useRef([]);
+  // Serialize PUTs so concurrent mutations don't reorder on the network and
+  // a stale write can't clobber a newer one.
+  const writeChainRef = useRef(Promise.resolve());
+
+  const applyNotes = useCallback((updated) => {
+    notesRef.current = updated;
+    setNotes(updated);
+  }, []);
 
   const load = useCallback(async () => {
     if (IS_NEW) return;
     try {
       const res = await fetch('/api/annotations/' + filePath);
       const data = await res.json();
-      setNotes(data.annotations || []);
-    } catch (e) { setNotes([]); }
-  }, [filePath]);
+      applyNotes(data.annotations || []);
+    } catch (e) { applyNotes([]); }
+  }, [filePath, applyNotes]);
 
-  const persist = useCallback(async (updated) => {
+  const persist = useCallback((updated) => {
     const path = savedPathRef.current;
-    if (!path) return;
-    await fetch('/api/annotations/' + path, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ annotations: updated })
-    });
+    if (!path) return Promise.resolve();
+    // Snapshot the payload and chain on the existing write queue so PUTs run
+    // strictly in order — last enqueued is the last to land on disk.
+    const payload = JSON.stringify({ annotations: updated });
+    const next = writeChainRef.current.then(() =>
+      fetch('/api/annotations/' + path, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      }).catch(() => {})
+    );
+    writeChainRef.current = next;
+    return next;
   }, []);
 
   const addNote = useCallback(async (text, comment) => {
@@ -946,31 +1231,31 @@ function useNotes(filePath) {
       text, comment,
       created: new Date().toISOString(), updated: new Date().toISOString()
     };
-    let updated;
-    setNotes(prev => { updated = [...prev, ann]; return updated; });
+    const updated = [...notesRef.current, ann];
+    applyNotes(updated);
     await persist(updated);
     return ann;
-  }, [persist]);
+  }, [persist, applyNotes]);
 
   const updateNote = useCallback(async (id, comment) => {
-    let updated;
-    setNotes(prev => { updated = prev.map(a => a.id === id ? { ...a, comment, updated: new Date().toISOString() } : a); return updated; });
+    const updated = notesRef.current.map(a => a.id === id ? { ...a, comment, updated: new Date().toISOString() } : a);
+    applyNotes(updated);
     await persist(updated);
-  }, [persist]);
+  }, [persist, applyNotes]);
 
   const resolveNote = useCallback(async (id) => {
-    let updated;
-    setNotes(prev => { updated = prev.map(a => a.id === id ? { ...a, resolved: a.resolved ? null : new Date().toISOString(), updated: new Date().toISOString() } : a); return updated; });
+    const updated = notesRef.current.map(a => a.id === id ? { ...a, resolved: a.resolved ? null : new Date().toISOString(), updated: new Date().toISOString() } : a);
+    applyNotes(updated);
     await persist(updated);
-  }, [persist]);
+  }, [persist, applyNotes]);
 
   const deleteNote = useCallback(async (id) => {
-    let updated;
-    setNotes(prev => { updated = prev.filter(a => a.id !== id); return updated; });
+    const updated = notesRef.current.filter(a => a.id !== id);
+    applyNotes(updated);
     await persist(updated);
-  }, [persist]);
+  }, [persist, applyNotes]);
 
-  return { notes, setNotes, load, persist, addNote, updateNote, resolveNote, deleteNote, savedPathRef };
+  return { notes, notesRef, setNotes: applyNotes, load, persist, addNote, updateNote, resolveNote, deleteNote, savedPathRef };
 }
 
 // ── Components ──
@@ -1181,16 +1466,24 @@ function RawEditor({ markdown, onDirty, cmEditorRef, cmThemeCompRef, theme }) {
   return html\`<div id="cm-wrap" ref=\${wrapRef} style="display:block"></div>\`;
 }
 
-function FormattedEditor({ markdown, notes, onDirty }) {
+function FormattedEditor({ markdown, notes, onDirty, renderVersion }) {
   const ref = useRef(null);
+  // Only re-render the contenteditable's innerHTML when explicitly asked
+  // (renderVersion bumps on mount, mode switch, conflict reload, note actions).
+  // We deliberately do NOT include markdown in deps: when a save fires,
+  // setMarkdown(content) updates the parent's state with the post-save value,
+  // and re-rendering innerHTML would destroy the user's cursor/selection and
+  // steal focus mid-edit. The DOM is the source of truth while editing.
+  const markdownRef = useLatest(markdown);
+  const notesRef = useLatest(notes);
   useEffect(() => {
     if (!ref.current) return;
-    ref.current.innerHTML = marked.parse(stashComments(markdown));
+    ref.current.innerHTML = marked.parse(stashComments(markdownRef.current));
     rewriteImageSrcs(ref.current);
     wireTableExpand(ref.current);
-    applyAnnotations(ref.current, notes, null); // view-only highlights in edit mode
+    applyAnnotations(ref.current, notesRef.current, null); // view-only highlights in edit mode
     ref.current.focus();
-  }, [markdown]);
+  }, [renderVersion]);
   return html\`<article class="prose" id="formatted-editor" contenteditable="true" ref=\${ref}
     style="display:block" onInput=\${onDirty}></article>\`;
 }
@@ -1305,13 +1598,13 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
     saveTimerRef.current = setTimeout(async () => {
       const editing = editingRef.current;
       if (editing) {
-        onUpdate(editing.id, val.trim());
+        onUpdate(editing.id, val);
         flashStatus('Saved');
       } else {
         const text = selTextRef.current;
         if (!text || !text.trim()) return;
         removePendingHighlights();
-        const newNote = await onAdd(text.replace(/\\s+/g, ' ').trim(), val.trim());
+        const newNote = await onAdd(text.replace(/\\s+/g, ' ').trim(), val);
         flashStatus('Note created');
         if (newNote && onNoteCreated) onNoteCreated(newNote.id);
       }
@@ -1443,6 +1736,120 @@ function NewFileBar({ visible }) {
     </div>\`;
 }
 
+// ── Chat ──
+
+function ChatPanel({ getArticleText }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => { scrollToBottom(); }, [messages]);
+  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || streaming) return;
+    const userMsg = { role: 'user', content: text };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput('');
+    setStreaming(true);
+
+    try {
+      const articleText = getArticleText ? getArticleText() : '';
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages, articleContext: articleText }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'request failed' }));
+        setMessages(m => [...m, { role: 'error', content: err.error || 'request failed' }]);
+        setStreaming(false);
+        return;
+      }
+      // Stream SSE
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantText = '';
+      setMessages(m => [...m, { role: 'assistant', content: '' }]);
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                assistantText += parsed.text;
+                setMessages(m => {
+                  const copy = m.slice();
+                  copy[copy.length - 1] = { role: 'assistant', content: assistantText };
+                  return copy;
+                });
+              }
+              if (parsed.error) {
+                setMessages(m => [...m.slice(0, -1), { role: 'error', content: parsed.error }]);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      setMessages(m => [...m, { role: 'error', content: 'Connection failed' }]);
+    }
+    setStreaming(false);
+  }, [input, messages, streaming, getArticleText]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  }, [send]);
+
+  const clearChat = useCallback(() => { setMessages([]); }, []);
+
+  if (!open) {
+    return html\`<button class="chat-toggle" onClick=\${() => setOpen(true)} title="Chat with AI">\u{1F4AC}</button>\`;
+  }
+
+  return html\`
+    <div class="chat-panel">
+      <div class="chat-header">
+        <span>Chat</span>
+        <div style="display:flex;gap:0.5rem">
+          <button onClick=\${clearChat}>Clear</button>
+          <button onClick=\${() => setOpen(false)}>✕</button>
+        </div>
+      </div>
+      <div class="chat-messages">
+        \${messages.length === 0 ? html\`<div class="chat-empty">Ask anything about this article</div>\` : null}
+        \${messages.map((m, i) => m.role === 'error'
+          ? html\`<div key=\${i} class="chat-error">⚠ \${m.content}</div>\`
+          : html\`<div key=\${i} class=\${'chat-msg ' + m.role}>\${m.content}</div>\`
+        )}
+        <div ref=\${messagesEndRef} />
+      </div>
+      <div class="chat-input-row">
+        <input ref=\${inputRef} value=\${input} onInput=\${e => setInput(e.target.value)}
+          onKeyDown=\${handleKeyDown} placeholder="Ask about this article…"
+          disabled=\${streaming} />
+        <button onClick=\${send} disabled=\${streaming || !input.trim()}>Send</button>
+      </div>
+    </div>\`;
+}
+
 // ── DocApp ──
 
 function DocApp() {
@@ -1463,7 +1870,7 @@ function DocApp() {
   const cmEditorRef = useRef(null);
   const cmThemeCompRef = useRef(null);
   const notesHook = useNotes(FILE_PATH);
-  const { notes, load: loadNotes, addNote, updateNote, resolveNote, deleteNote } = notesHook;
+  const { notes, notesRef, load: loadNotes, addNote, updateNote, resolveNote, deleteNote } = notesHook;
 
   const markdownRef = useLatest(markdown);
 
@@ -1482,11 +1889,20 @@ function DocApp() {
     return markdownRef.current;
   }, [mode]);
 
+  const getArticleText = useCallback(() => markdownRef.current, []);
+
   // Save function
   const save = useCallback(async () => {
     const fe = document.getElementById('formatted-editor');
+    // syncAnnotationTexts mutates note objects in-place when the underlying
+    // text changed in the formatted editor. Track whether anything actually
+    // changed so we only re-persist annotations when needed (avoids racing
+    // with annotation mutations that already persisted themselves).
+    let notesNeedSave = false;
     if (mode === 'formatted' && fe) {
-      syncAnnotationTexts(fe, notes);
+      const before = JSON.stringify(notesRef.current);
+      syncAnnotationTexts(fe, notesRef.current);
+      if (JSON.stringify(notesRef.current) !== before) notesNeedSave = true;
     }
     const content = getContent();
 
@@ -1502,7 +1918,9 @@ function DocApp() {
         setIsDirty(false);
         setMarkdown(content);
         history.replaceState(null, '', '/doc/' + name);
-        await notesHook.persist(notes);
+        // Initial persist for a brand-new file: at this point savedPathRef
+        // just became valid, so any prior annotation mutations were no-ops.
+        await notesHook.persist(notesRef.current);
       } else {
         const d = await res.json();
         alert('Error: ' + (d.error || 'save failed'));
@@ -1528,7 +1946,11 @@ function DocApp() {
         if (wasAutoSaveRef.current) setAutoSave(true);
         wasAutoSaveRef.current = false;
       }
-      await notesHook.persist(notes);
+      // Only re-persist annotations if syncAnnotationTexts actually mutated
+      // them. The annotation hook persists its own mutations, so re-PUTing
+      // a stale closure of notes here was racing with in-flight writes
+      // and clobbering them — that is the "saving in parts" bug.
+      if (notesNeedSave) await notesHook.persist(notesRef.current);
     } else if (res.status === 409) {
       if (!isDirty) {
         // Silent reload
@@ -1550,7 +1972,7 @@ function DocApp() {
       const d = await res.json();
       alert('Error: ' + (d.error || 'save failed'));
     }
-  }, [mode, conflictState, isDirty, autoSave, notes, getContent]);
+  }, [mode, conflictState, isDirty, autoSave, getContent]);
 
   const saveRef = useLatest(save);
   const autoSaveRef = useLatest(autoSave);
@@ -1671,12 +2093,13 @@ function DocApp() {
         \${mode === 'raw' ? html\`<\${RawEditor} markdown=\${markdown} onDirty=\${markDirty}
           cmEditorRef=\${cmEditorRef} cmThemeCompRef=\${cmThemeCompRef} theme=\${theme} />\` : null}
         \${mode === 'formatted' ? html\`<\${FormattedEditor} markdown=\${markdown} notes=\${notes}
-          onDirty=\${markDirty} />\` : null}
+          onDirty=\${markDirty} renderVersion=\${renderVersion} />\` : null}
       </main>
     </div>
     <\${NotesSidebar} notes=\${notes} onAdd=\${handleAddNote} onUpdate=\${handleUpdate}
       onResolve=\${handleResolve} onDelete=\${handleDelete} mode=\${mode}
-      onNoteClick=\${handleNoteClick} />\`;
+      onNoteClick=\${handleNoteClick} />
+    <\${ChatPanel} getArticleText=\${getArticleText} />\`;
 }
 
 render(html\`<\${DocApp} />\`, document.getElementById('app'));
@@ -1705,7 +2128,7 @@ function htmlResponse(html: string, status = 200): Response {
 
 function safePath(rel: string): string | null {
   const fp = resolve(BASE_DIR, rel);
-  if (!fp.startsWith(BASE_DIR)) return null;
+  if (fp !== BASE_DIR && !fp.startsWith(BASE_DIR + "/")) return null;
   return fp;
 }
 
@@ -1730,13 +2153,28 @@ async function handler(req: Request): Promise<Response> {
 
   // GET /doc/:path
   if (method === "GET" && path.startsWith("/doc/")) {
-    const rel = path.slice(5);
+    const rawRel = path.slice(5);
+    // Normalize trailing slash for directory lookups (keep a flag for redirect)
+    const trailingSlash = rawRel.endsWith("/");
+    const rel = trailingSlash ? rawRel.slice(0, -1) : rawRel;
     const fp = safePath(rel);
     if (!fp) return jsonResponse({ error: "not found" }, 404);
+    let stat: Deno.FileInfo;
     try {
-      await Deno.stat(fp);
+      stat = await Deno.stat(fp);
     } catch {
       return jsonResponse({ error: "not found" }, 404);
+    }
+    if (stat.isDirectory) {
+      // Canonicalize directory URLs to end with "/" so relative links work
+      if (!trailingSlash) {
+        return new Response(null, {
+          status: 301,
+          headers: { Location: "/doc/" + rel + "/" },
+        });
+      }
+      const entries = await collectDirEntries(fp, rel);
+      return htmlResponse(dirPage(rel, entries));
     }
     const name = basename(fp, ".md");
     const title = name.replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -1751,7 +2189,8 @@ async function handler(req: Request): Promise<Response> {
   // GET /static/*
   if (method === "GET" && path.startsWith("/static/")) {
     const rel = path.slice(8);
-    const fp = join(BASE_DIR, rel);
+    const fp = safePath(rel);
+    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
     try {
       const data = await Deno.readFile(fp);
       const ext = extname(fp);
@@ -1792,7 +2231,8 @@ async function handler(req: Request): Promise<Response> {
   // GET /api/annotations/:path
   if (method === "GET" && path.startsWith("/api/annotations/")) {
     const rel = path.slice(17);
-    const fp = join(BASE_DIR, rel + ".annotations.json");
+    const fp = safePath(rel + ".annotations.json");
+    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
     try {
       const data = await Deno.readTextFile(fp);
       return jsonResponse(JSON.parse(data));
@@ -1829,7 +2269,8 @@ async function handler(req: Request): Promise<Response> {
   // PUT /api/annotations/:path
   if (method === "PUT" && path.startsWith("/api/annotations/")) {
     const rel = path.slice(17);
-    const fp = join(BASE_DIR, rel + ".annotations.json");
+    const fp = safePath(rel + ".annotations.json");
+    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
     const body = await req.json();
     await Deno.writeTextFile(fp, JSON.stringify(body, null, 2));
     return jsonResponse({ ok: true });
@@ -1852,6 +2293,89 @@ async function handler(req: Request): Promise<Response> {
     await Deno.mkdir(dir, { recursive: true });
     await Deno.writeTextFile(fp, body.content || "");
     return jsonResponse({ ok: true, path: rel });
+  }
+
+  // POST /api/chat
+  if (method === "POST" && path === "/api/chat") {
+    if (!ANTHROPIC_API_KEY) {
+      return jsonResponse({ error: "ANTHROPIC_API_KEY not set" }, 500);
+    }
+    const body = await req.json();
+    const userMessages = (body.messages || []).map((m: { role: string; content: string }) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content,
+    }));
+    if (!userMessages.length) return jsonResponse({ error: "no messages" }, 400);
+
+    const systemPrompt = body.articleContext
+      ? `You are a helpful reading assistant. The user is reading the following article and may ask questions about it. Be concise.\n\n<article>\n${body.articleContext}\n</article>`
+      : 'You are a helpful reading assistant. Be concise.';
+
+    try {
+      const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages: userMessages,
+          stream: true,
+        }),
+      });
+      if (!apiRes.ok) {
+        const err = await apiRes.text();
+        return jsonResponse({ error: `Anthropic API error: ${apiRes.status}` }, 502);
+      }
+
+      // Stream SSE back to client
+      const stream = new ReadableStream({
+        async start(controller) {
+          const reader = apiRes.body!.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop() || '';
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6).trim();
+                  if (!data || data === '[DONE]') continue;
+                  try {
+                    const evt = JSON.parse(data);
+                    if (evt.type === 'content_block_delta' && evt.delta?.text) {
+                      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ text: evt.delta.text })}\n\n`));
+                    }
+                  } catch {}
+                }
+              }
+            }
+            controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          } catch (e) {
+            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: 'stream error' })}\n\n`));
+          }
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    } catch (e) {
+      return jsonResponse({ error: 'Failed to reach Anthropic API' }, 502);
+    }
   }
 
   return jsonResponse({ error: "not found" }, 404);
@@ -1882,6 +2406,38 @@ async function collectFiles(
       });
     }
   }
+}
+
+type DirEntry =
+  | { kind: "dir"; rel: string; name: string; mtime: number }
+  | { kind: "file"; rel: string; name: string; mtime: number; mins: number };
+
+async function collectDirEntries(absDir: string, relDir: string): Promise<DirEntry[]> {
+  const out: DirEntry[] = [];
+  for await (const entry of Deno.readDir(absDir)) {
+    const rel = relDir ? relDir + "/" + entry.name : entry.name;
+    const fp = join(absDir, entry.name);
+    if (entry.isDirectory) {
+      let mtime = 0;
+      try {
+        const st = await Deno.stat(fp);
+        mtime = getMtime(st) || 0;
+      } catch { /* ignore */ }
+      out.push({ kind: "dir", rel, name: entry.name, mtime });
+    } else if (entry.isFile && entry.name.endsWith(".md") && !entry.name.endsWith(".annotations.json")) {
+      const stat = await Deno.stat(fp);
+      const content = await Deno.readTextFile(fp);
+      const words = content.split(/\s+/).filter(w => w).length;
+      out.push({
+        kind: "file",
+        rel,
+        name: entry.name.replace(/\.md$/, ""),
+        mtime: getMtime(stat) || 0,
+        mins: Math.max(1, Math.ceil(words / 238)),
+      });
+    }
+  }
+  return out;
 }
 
 // ── Server ──────────────────────────────────────────────────────────────────────
