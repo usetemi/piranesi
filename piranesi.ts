@@ -1,19 +1,30 @@
 #!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env
 /**
  * mdmaster — unified markdown reader/writer
- * Single-file Deno server. Preact+htm client via CDN. Zero deps.
+ * Single-file Deno server. Preact+htm client via CDN. No build step.
  *
  * Usage: deno run --allow-net --allow-read --allow-write mdmaster.ts [directory]
  *        Defaults to working_data/
  */
 
 import { resolve, join, extname, basename, dirname } from "https://deno.land/std@0.224.0/path/mod.ts";
+import { streamText } from "https://esm.sh/ai@4.3.16";
+import { createOpenAI } from "https://esm.sh/@ai-sdk/openai@1.3.22";
+import { createAnthropic } from "https://esm.sh/@ai-sdk/anthropic@1.2.12";
 
 // ── Config ──────────────────────────────────────────────────────────────────────
 
 const PREFERRED_PORT = parseInt(Deno.env.get("PORT") || "8888");
 const BASE_DIR = resolve(Deno.args[0] || "working_data/");
+
+// LLM provider — prefer Anthropic, fall back to OpenAI
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
+const chatModel = ANTHROPIC_API_KEY
+  ? createAnthropic({ apiKey: ANTHROPIC_API_KEY })("claude-sonnet-4-20250514")
+  : OPENAI_API_KEY
+    ? createOpenAI({ apiKey: OPENAI_API_KEY })("gpt-4o-mini")
+    : null;
 
 // ── MIME types ───────────────────────────────────────────────────────────────────
 
@@ -37,13 +48,13 @@ const THEME_CSS = `
   --hr: #d6d3d1; --progress: #0071ce;
 }
 [data-theme="dark"] {
-  --bg: #0a0a0a; --fg: #e7e5e4; --fg2: #a8a29e; --fg3: #57534e;
-  --border: #1c1917; --card-bg: #0c0a09; --card-hover: #1c1917;
+  --bg: #000000; --fg: #e7e5e4; --fg2: #a8a29e; --fg3: #57534e;
+  --border: #1a1a1a; --card-bg: #000000; --card-hover: #111111;
   --accent: #00a3ff; --link: #00a3ff;
   --highlight: rgba(251, 191, 36, 0.3); --highlight-hover: rgba(251, 191, 36, 0.5);
-  --blockquote-bg: #0c0a09; --blockquote-border: #004c99;
-  --code-bg: #0c0a09; --code-border: #1c1917;
-  --hr: #1c1917; --progress: #00a3ff;
+  --blockquote-bg: #000000; --blockquote-border: #004c99;
+  --code-bg: #0a0a0a; --code-border: #1a1a1a;
+  --hr: #1a1a1a; --progress: #00a3ff;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
@@ -131,21 +142,20 @@ const PROSE_CSS = `
 /* Footnotes */
 .prose .footnote-ref { font-size: 0.75em; text-decoration: none; color: var(--accent); font-weight: 600; }
 .prose .footnote-ref:hover { text-decoration: underline; }
-.prose .footnote-tooltip {
-  display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+.footnote-tooltip {
+  position: fixed; z-index: 200; pointer-events: none;
   background: #1c1917; color: #f5f5f4; padding: 0.5rem 0.75rem; border-radius: 8px;
   font-size: 0.78rem; line-height: 1.5; width: max-content; max-width: 320px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 50; pointer-events: none;
-  margin-bottom: 6px; font-weight: 400; text-align: left; white-space: normal;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  font-weight: 400; text-align: left; white-space: normal;
 }
-.prose .footnote-tooltip p { margin: 0; }
-.prose .footnote-tooltip::after {
+.footnote-tooltip p { margin: 0; }
+.footnote-tooltip::after {
   content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   border: 5px solid transparent; border-top-color: #1c1917;
 }
-.prose sup:hover .footnote-tooltip { display: block; }
-[data-theme="dark"] .prose .footnote-tooltip { background: #292524; color: #e7e5e4; }
-[data-theme="dark"] .prose .footnote-tooltip::after { border-top-color: #292524; }
+[data-theme="dark"] .footnote-tooltip { background: #292524; color: #e7e5e4; }
+[data-theme="dark"] .footnote-tooltip::after { border-top-color: #292524; }
 .prose sup { line-height: 0; position: relative; }
 .prose sup::after {
   content: ''; position: absolute; inset: -2px -4px;
@@ -155,6 +165,9 @@ const PROSE_CSS = `
 }
 .prose sup:hover::after { animation: fn-shine 3s 0.1s linear infinite; opacity: 1; }
 .prose .footnote-back { text-decoration: none; color: var(--accent); }
+.fn-flash-bg { background: var(--code-bg); border-radius: 6px; }
+@keyframes fn-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+.fn-flash-num { animation: fn-blink 0.5s ease-in-out 2; }
 .prose .footnotes-section { font-size: 0.85rem; color: var(--fg2); }
 .prose .footnotes-section h2 { margin-top: 0.75rem; }
 .prose .footnotes-section ol { margin-top: 0.5rem; margin-left: 1.5rem; list-style: decimal; padding-left: 0.5rem; }
@@ -216,6 +229,20 @@ const LAYOUT_CSS = `
 .toc-links a.depth-2 { padding-left: 0.75rem; }
 .toc-links a.depth-3 { padding-left: 1.5rem; font-size: 0.7rem; }
 .toc-links a.depth-4 { padding-left: 2.25rem; font-size: 0.68rem; }
+/* Rename button above TOC */
+.rename-btn {
+  display: block; width: 100%; text-align: center; background: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.35rem 0.6rem; margin-bottom: 0.75rem;
+  font-size: 0.68rem; font-family: inherit; color: var(--fg2); cursor: pointer;
+  transition: border-color 0.15s, color 0.15s; line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rename-btn:hover { border-color: var(--accent); color: var(--fg); }
+.rename-btn:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--fg3); }
+.rename-btn .rename-label { display: block; font-size: 0.82rem; color: var(--fg); margin-bottom: 0.15rem; }
+.rename-btn .rename-preview { display: block; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace; font-size: 0.64rem; }
+.rename-btn .rename-hint { display: block; font-size: 0.6rem; color: var(--fg3); margin-top: 0.15rem; font-style: italic; }
+
 .main-col {
   width: 100%; max-width: 60ch; min-width: 0;
   margin: 0 auto; padding: 2rem 2.5rem 6rem;
@@ -397,7 +424,6 @@ const ANNOTATION_CSS = `
 .note-input-section textarea:focus { outline: none; border-color: var(--accent); }
 .note-save-status { font-size: 0.68rem; color: var(--fg3); height: 1rem; line-height: 1rem; display: block; transition: opacity 1.5s ease; opacity: 1; overflow: hidden; }
 .note-save-status.dirty { color: var(--accent); transition: none; }
-.note-save-status.fading { opacity: 0; }
 /* Note list */
 .note-list { display: flex; flex-direction: column; gap: 0.35rem; }
 .note-list-title { font-weight: 600; color: var(--fg3); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.6rem; margin-bottom: 0.25rem; }
@@ -464,7 +490,7 @@ const CHAT_CSS = `
 .chat-toggle:hover { transform: scale(1.08); }
 .chat-panel {
   position: fixed; bottom: 4.5rem; right: 1.5rem; z-index: 90;
-  width: 360px; max-height: 500px; display: flex; flex-direction: column;
+  width: 420px; max-height: 70vh; display: flex; flex-direction: column;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.12); overflow: hidden;
 }
@@ -479,41 +505,76 @@ const CHAT_CSS = `
 .chat-header button:hover { color: var(--fg); }
 .chat-messages {
   flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem;
-  min-height: 200px; max-height: 380px;
+  min-height: 300px; max-height: calc(70vh - 7.5rem);
 }
 .chat-messages::-webkit-scrollbar { width: 3px; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .chat-msg {
   font-size: 0.82rem; line-height: 1.5; padding: 0.5rem 0.7rem;
-  border-radius: 10px; max-width: 88%; word-break: break-word; white-space: pre-wrap;
+  border-radius: 10px; max-width: 88%; word-break: break-word;
 }
 .chat-msg.user {
   align-self: flex-end; background: var(--accent); color: #fff;
-  border-bottom-right-radius: 3px;
+  border-bottom-right-radius: 3px; white-space: pre-wrap;
 }
 .chat-msg.assistant {
   align-self: flex-start; background: var(--code-bg); color: var(--fg);
   border-bottom-left-radius: 3px;
 }
+/* Markdown content inside assistant messages */
 .chat-msg.assistant p { margin: 0 0 0.4rem; }
 .chat-msg.assistant p:last-child { margin-bottom: 0; }
 .chat-msg.assistant code { background: var(--border); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.78rem; }
-.chat-input-row {
-  display: flex; gap: 0.4rem; padding: 0.6rem 0.75rem; border-top: 1px solid var(--border);
+.chat-msg.assistant pre {
+  background: var(--border); padding: 0.5rem 0.6rem; border-radius: 6px;
+  overflow-x: auto; font-size: 0.76rem; margin: 0.4rem 0; line-height: 1.5;
 }
-.chat-input-row input {
+.chat-msg.assistant pre code { background: none; padding: 0; font-size: inherit; }
+.chat-msg.assistant h1, .chat-msg.assistant h2, .chat-msg.assistant h3, .chat-msg.assistant h4 {
+  font-size: 0.88rem; font-weight: 600; margin: 0.6rem 0 0.2rem;
+}
+.chat-msg.assistant ul, .chat-msg.assistant ol {
+  margin: 0.3rem 0 0.3rem 1.2rem; padding: 0;
+}
+.chat-msg.assistant li { margin-bottom: 0.15rem; }
+.chat-msg.assistant blockquote {
+  border-left: 2px solid var(--accent); margin: 0.4rem 0; padding: 0.2rem 0 0.2rem 0.6rem;
+  color: var(--fg2); font-style: italic;
+}
+.chat-msg.assistant strong { font-weight: 600; }
+.chat-msg.assistant a { color: var(--link); text-decoration: underline; }
+.chat-msg.assistant hr { border: none; height: 1px; background: var(--border); margin: 0.5rem 0; }
+.chat-msg.assistant table { border-collapse: collapse; font-size: 0.78rem; margin: 0.3rem 0; }
+.chat-msg.assistant th, .chat-msg.assistant td { border: 1px solid var(--border); padding: 0.25rem 0.4rem; }
+.chat-msg.assistant th { background: var(--code-bg); font-weight: 600; }
+/* Streaming indicator */
+.chat-cursor {
+  display: inline-block; width: 2px; height: 0.9em; background: var(--accent);
+  margin-left: 2px; vertical-align: text-bottom; border-radius: 1px;
+  animation: chat-blink 0.8s steps(2) infinite;
+}
+@keyframes chat-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+/* Input area */
+.chat-input-area { border-top: 1px solid var(--border); padding: 0.5rem 0.75rem; }
+.chat-input-row {
+  display: flex; gap: 0.4rem; align-items: flex-end;
+}
+.chat-input-row textarea {
   flex: 1; border: 1px solid var(--border); border-radius: 8px;
   padding: 0.4rem 0.6rem; font-size: 0.82rem; font-family: inherit;
   background: var(--bg); color: var(--fg); outline: none;
+  resize: none; overflow-y: auto; min-height: 1.6rem; max-height: 6rem;
+  line-height: 1.5;
 }
-.chat-input-row input:focus { border-color: var(--accent); }
+.chat-input-row textarea:focus { border-color: var(--accent); }
 .chat-input-row button {
   background: var(--accent); color: #fff; border: none; border-radius: 8px;
   padding: 0.4rem 0.7rem; font-size: 0.78rem; cursor: pointer; font-weight: 500;
-  white-space: nowrap;
+  white-space: nowrap; flex-shrink: 0;
 }
 .chat-input-row button:disabled { opacity: 0.4; cursor: default; }
-.chat-empty { color: var(--fg3); font-size: 0.78rem; text-align: center; padding: 2rem 1rem; }
+.chat-input-hint { font-size: 0.62rem; color: var(--fg3); text-align: right; margin-top: 0.25rem; }
+.chat-empty { color: var(--fg3); font-size: 0.78rem; text-align: center; padding: 2rem 1rem; line-height: 1.6; }
 .chat-error { color: #dc2626; font-size: 0.75rem; padding: 0.3rem 0.7rem; }
 `;
 
@@ -533,7 +594,58 @@ const RESPONSIVE_CSS = `
 }
 `;
 
-const ALL_CSS = THEME_CSS + PROSE_CSS + LAYOUT_CSS + EDITOR_CSS + ANNOTATION_CSS + INDEX_CSS + CHAT_CSS + RESPONSIVE_CSS;
+const PRINT_CSS = `
+@media print {
+  /* Hide all chrome */
+  .top-bar, .top-bar-spacer, .toc-sidebar, .notes-sidebar,
+  .chat-toggle, .chat-panel, #progress, .table-expand-btn,
+  .footnote-tooltip { display: none !important; }
+
+  /* Reset to plain document flow */
+  body { background: white; color: black; font-size: 12pt; }
+  .layout { position: static; }
+  .main-col {
+    max-width: none; width: 100%; margin: 0; padding: 0;
+    overflow: visible;
+  }
+
+  /* Clean typography for print (hyphens: auto already inherited from base .prose) */
+  .prose h1, .prose h2, .prose h3, .prose h4 { page-break-after: avoid; }
+  .prose p, .prose li, .prose blockquote { orphans: 3; widows: 3; }
+  .prose pre, .prose blockquote, .prose table, .prose img { page-break-inside: avoid; }
+  .prose img { max-width: 100%; }
+
+  /* Make links readable on paper */
+  .prose a { color: black; text-decoration: underline; }
+  .prose a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #555; word-break: break-all; }
+  .prose a.section-ref::after { content: none; }
+  .prose a.footnote-ref::after, .prose a.footnote-back::after { content: none; }
+
+  /* Strip annotation highlights */
+  .annotated { background: none !important; outline: none !important; }
+
+  /* Tables */
+  .prose .table-wrap { overflow: visible; }
+  .prose .table-wrap.expanded { width: auto !important; margin-left: 0 !important; }
+  .prose th, .prose td { border: 1px solid #ccc; }
+  .prose th { background: #f0f0f0; }
+
+  /* Code blocks */
+  .prose pre { border: 1px solid #ddd; background: #f8f8f8; white-space: pre-wrap; word-wrap: break-word; }
+  .prose code { border: 1px solid #ddd; background: #f8f8f8; }
+
+  /* Blockquotes */
+  .prose blockquote { background: none; border-left: 3px solid #999; }
+
+  /* Drop cap — keep it but in black */
+  .prose > p:first-child::first-letter { color: black; }
+
+  /* No transitions/animations */
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+`;
+
+const ALL_CSS = THEME_CSS + PROSE_CSS + LAYOUT_CSS + EDITOR_CSS + ANNOTATION_CSS + INDEX_CSS + CHAT_CSS + RESPONSIVE_CSS + PRINT_CSS;
 
 // ── Page builders ───────────────────────────────────────────────────────────────
 
@@ -950,53 +1062,62 @@ function removePendingHighlights() {
 }
 
 function wireFootnotes(container) {
-  const headings = container.querySelectorAll('h2');
-  let fnHeading = null;
-  headings.forEach(h => { if (/^footnotes$/i.test(h.textContent.trim())) fnHeading = h; });
-  if (fnHeading) {
-    const section = document.createElement('div');
-    section.className = 'footnotes-section';
-    fnHeading.parentNode.insertBefore(section, fnHeading);
-    while (section.nextSibling) section.appendChild(section.nextSibling);
-    section.querySelectorAll('ol > li').forEach(li => li.classList.add('fn-item'));
+  // Style the plugin-generated footnotes section
+  const fnSection = container.querySelector('section[data-footnotes]');
+  if (fnSection) {
+    fnSection.classList.add('footnotes-section');
+    fnSection.querySelectorAll('ol > li').forEach(li => li.classList.add('fn-item'));
   }
-  // Wire footnote refs: add class, ensure sup wrap, attach tooltip
+
+  // Forward refs: add class, hover tooltip (fixed-position, appended to body).
+  // Known issue: if a re-render fires while a tooltip is showing, the mouseleave
+  // handler on the destroyed <a> never fires and the tooltip orphans in <body>.
+  // Negligible — only happens if hover coincides exactly with a re-render.
   container.querySelectorAll('a[data-footnote-ref]').forEach(a => {
     a.classList.add('footnote-ref');
-    if (a.parentNode.tagName !== 'SUP') {
-      const sup = document.createElement('sup');
-      a.parentNode.insertBefore(sup, a);
-      sup.appendChild(a);
-    }
-    // Hover tooltip
     const href = a.getAttribute('href');
-    if (href) {
-      const fnLi = container.querySelector(href);
-      if (fnLi) {
-        const tip = document.createElement('div');
+    if (!href) return;
+    const fnEl = document.getElementById(href.slice(1));
+    if (!fnEl) return;
+    let tip = null;
+    const show = () => {
+      if (!tip) {
+        tip = document.createElement('div');
         tip.className = 'footnote-tooltip';
-        const clone = fnLi.cloneNode(true);
+        const clone = fnEl.cloneNode(true);
         clone.querySelectorAll('[data-footnote-backref]').forEach(b => b.remove());
         tip.innerHTML = clone.innerHTML;
-        const sup = a.closest('sup');
-        if (sup) sup.appendChild(tip); else a.parentNode.appendChild(tip);
       }
-    }
+      document.body.appendChild(tip);
+      const rect = a.getBoundingClientRect();
+      tip.style.left = rect.left + rect.width / 2 - tip.offsetWidth / 2 + 'px';
+      tip.style.top = rect.top - tip.offsetHeight - 8 + 'px';
+    };
+    const hide = () => { if (tip && tip.parentNode) tip.parentNode.removeChild(tip); };
+    a.addEventListener('mouseenter', show);
+    a.addEventListener('mouseleave', hide);
   });
-  // Smooth-scroll all footnote links (both directions)
+
+  // Backrefs: add class
+  container.querySelectorAll('a[data-footnote-backref]').forEach(a => {
+    a.classList.add('footnote-back');
+  });
+
+  // Smooth-scroll click handlers (both directions)
   container.querySelectorAll('a[data-footnote-ref], a[data-footnote-backref]').forEach(a => {
     a.addEventListener('click', e => {
       const href = a.getAttribute('href');
       if (!href) return;
-      const target = document.querySelector(href);
-      if (target) {
-        e.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Brief highlight on the target
-        target.style.outline = '2px solid var(--accent)';
-        target.style.outlineOffset = '4px';
-        target.style.borderRadius = '4px';
-        setTimeout(() => { target.style.outline = ''; target.style.outlineOffset = ''; }, 2000);
+      const target = document.getElementById(href.slice(1));
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (target.tagName === 'LI') {
+        container.querySelectorAll('.fn-flash-bg').forEach(el => el.classList.remove('fn-flash-bg'));
+        target.classList.add('fn-flash-bg');
+      } else {
+        target.classList.add('fn-flash-num');
+        setTimeout(() => target.classList.remove('fn-flash-num'), 1000);
       }
     });
   });
@@ -1128,6 +1249,43 @@ function htmlToMarkdown(el) {
     });
     tdInstance.addRule('superscript', { filter: 'sup', replacement: content => '<sup>' + content + '</sup>' });
     tdInstance.addRule('subscript', { filter: 'sub', replacement: content => '<sub>' + content + '</sub>' });
+    // Footnote round-trip: reconstruct [^label] / [^label]: from marked-footnote HTML.
+    // These rules are added AFTER superscript so they take priority (Turndown checks last-added first).
+    tdInstance.addRule('footnoteRef', {
+      filter: node => {
+        if (node.nodeName !== 'SUP') return false;
+        return !!node.querySelector('a[data-footnote-ref]');
+      },
+      replacement: (content, node) => {
+        const a = node.querySelector('a[data-footnote-ref]');
+        if (!a) return '<sup>' + content + '</sup>';
+        const id = a.getAttribute('id') || '';
+        const label = id.replace(/^footnote-ref-/, '');
+        return label ? '[^' + label + ']' : '<sup>' + content + '</sup>';
+      }
+    });
+    tdInstance.addRule('footnotesSection', {
+      filter: node => node.nodeName === 'SECTION' && node.hasAttribute('data-footnotes'),
+      replacement: (content, node) => {
+        const items = node.querySelectorAll('ol > li');
+        if (!items.length) return '';
+        const defs = [];
+        items.forEach(li => {
+          const id = li.getAttribute('id') || '';
+          const label = id.replace(/^footnote-/, '');
+          if (!label) return;
+          // Clone, strip backrefs, then convert inner HTML to markdown.
+          // Known issue: if contenteditable mutations strip the data-footnote-backref
+          // attribute, the backref "↩" char leaks into the reconstructed definition text.
+          const clone = li.cloneNode(true);
+          clone.querySelectorAll('[data-footnote-backref]').forEach(b => b.remove());
+          // Use Turndown on the inner content of this single <li>
+          const inner = tdInstance.turndown(clone.innerHTML).trim();
+          defs.push('[^' + label + ']: ' + inner);
+        });
+        return '\\n' + defs.join('\\n\\n') + '\\n';
+      }
+    });
   }
   return restoreComments(tdInstance.turndown(el.innerHTML));
 }
@@ -1324,7 +1482,90 @@ function TopBar({ mode, onSetMode, isDirty, autoSave, onSetAutoSave, onSave, con
     </div>\`;
 }
 
-function TocSidebar({ mode, cmEditorRef, tocVersion }) {
+// Normalize a title string into a safe filename (without extension)
+function normalizeFilename(title) {
+  return title
+    .toLowerCase()
+    .normalize('NFD').replace(/\\p{M}/gu, '')  // strip diacritics
+    .replace(/[^a-z0-9]+/g, '_')                       // non-alnum → underscore
+    .replace(/^_+|_+$/g, '')                           // trim leading/trailing
+    .replace(/_+/g, '_')                               // collapse runs
+    .slice(0, 80);                                     // reasonable length cap
+}
+
+// Extract first heading from markdown
+function extractTitle(md) {
+  const lines = (md || '').split('\\n');
+  for (const line of lines) {
+    const m = line.match(/^#+\\s+(.+)/);
+    if (m) return m[1].replace(/[*_\\\`#\\[\\]]/g, '').trim();
+  }
+  // Fallback: first non-empty line
+  for (const line of lines) {
+    const t = line.trim();
+    if (t) return t.slice(0, 60);
+  }
+  return '';
+}
+
+function RenameButton({ markdown, isDirty, filePath }) {
+  const [renaming, setRenaming] = useState(false);
+
+  const title = useMemo(() => extractTitle(markdown), [markdown]);
+  const canonicalName = useMemo(() => {
+    const n = normalizeFilename(title);
+    return n ? n + '.md' : '';
+  }, [title]);
+
+  // Determine current basename (without directory)
+  const currentName = useMemo(() => {
+    if (!filePath) return '';
+    const parts = filePath.split('/');
+    return parts[parts.length - 1];
+  }, [filePath]);
+
+  // Check if current name already matches canonical (prefix match — allows trailing random suffix)
+  const alreadyCanonical = useMemo(() => {
+    if (!canonicalName || !currentName) return true;
+    const base = canonicalName.replace(/\\.md$/, '');
+    const cur = currentName.replace(/\\.md$/, '');
+    return cur === base || cur.startsWith(base + '_');
+  }, [canonicalName, currentName]);
+
+  // Hide if: new file, no title, or already matching
+  if (IS_NEW || !canonicalName || alreadyCanonical) return null;
+
+  const handleRename = async () => {
+    if (isDirty || renaming) return;
+    setRenaming(true);
+    try {
+      const res = await fetch('/api/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: filePath, toName: canonicalName }),
+      });
+      const data = await res.json();
+      if (res.ok && data.newPath) {
+        window.location.href = '/doc/' + data.newPath;
+      } else {
+        alert('Rename failed: ' + (data.error || 'unknown error'));
+      }
+    } catch (e) {
+      alert('Rename failed: ' + e.message);
+    }
+    setRenaming(false);
+  };
+
+  return html\`
+    <button class="rename-btn" onClick=\${handleRename} disabled=\${isDirty || renaming}
+      title=\${isDirty ? 'Save edits before renaming' : 'Rename ' + currentName + ' → ' + canonicalName}>
+      <span class="rename-label">Rename file</span>
+      <span class="rename-preview">\${canonicalName}</span>
+      \${isDirty ? html\`<span class="rename-hint">save first</span>\` : null}
+    </button>\`;
+}
+
+function TocSidebar({ mode, cmEditorRef, tocVersion, markdown, isDirty }) {
   const linksRef = useRef(null);
   const observerRef = useRef(null);
   const [minimized, setMinimized] = useState(false);
@@ -1401,6 +1642,7 @@ function TocSidebar({ mode, cmEditorRef, tocVersion }) {
 
   return html\`
     <nav class=\${'toc-sidebar' + (minimized ? ' minimized' : '')}>
+      <\${RenameButton} markdown=\${markdown} isDirty=\${isDirty} filePath=\${FILE_PATH} />
       <div class="toc-header" onClick=\${() => setMinimized(!minimized)}>
         <span class="toc-title">Contents</span>
         <button class="toc-minimize">\${minimized ? '+' : '\\u2013'}</button>
@@ -1429,15 +1671,22 @@ function RawEditor({ markdown, onDirty, cmEditorRef, cmThemeCompRef, theme }) {
   useEffect(() => {
     if (!wrapRef.current) return;
     if (cmEditorRef.current) {
-      // Update content
-      const editor = cmEditorRef.current;
-      const current = editor.state.doc.toString();
-      if (current !== markdown) {
-        editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: markdown } });
+      // If the old editor's parent was destroyed (e.g. mode switched away and back),
+      // the editor is orphaned — destroy it and create a fresh one below.
+      if (!wrapRef.current.contains(cmEditorRef.current.dom)) {
+        cmEditorRef.current.destroy();
+        cmEditorRef.current = null;
+      } else {
+        // Update content
+        const editor = cmEditorRef.current;
+        const current = editor.state.doc.toString();
+        if (current !== markdown) {
+          editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: markdown } });
+        }
+        wrapRef.current.style.display = 'block';
+        editor.focus();
+        return;
       }
-      wrapRef.current.style.display = 'block';
-      editor.focus();
-      return;
     }
     const { EditorView, EditorState, basicSetup, markdown: mdLang, oneDark, Compartment } = CM;
     const themeComp = new Compartment();
@@ -1492,18 +1741,24 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
   const [comment, setComment] = useState('');
   const [selText, setSelText] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
-  const [fading, setFading] = useState(false);
   const textareaRef = useRef(null);
+  const textareaHeightRef = useRef(null);
   const saveTimerRef = useRef(null);
-  const statusTimerRef = useRef(null);
-  const fadeTimerRef = useRef(null);
-  const selTextRef = useRef('');
+  const flashTimerRef = useRef(null);
+  const selTextRef = useLatest(selText);
   const editingRef = useLatest(editingNote);
   const onClearEditingRef = useLatest(onClearEditing);
   const onSelectionActiveRef = useLatest(onSelectionActive);
 
-  // Keep refs in sync
-  useEffect(() => { selTextRef.current = selText; if (onSelTextChange) onSelTextChange(selText); }, [selText]);
+  useEffect(() => { if (onSelTextChange) onSelTextChange(selText); }, [selText]);
+
+  const autoResize = useCallback((el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    const h = el.scrollHeight + 'px';
+    el.style.height = h;
+    textareaHeightRef.current = h;
+  }, []);
 
   // When editingNote changes, populate the textarea
   useEffect(() => {
@@ -1511,7 +1766,6 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
       setComment(editingNote.comment || '');
       setSelText(editingNote.text);
       setSaveStatus('');
-      // Highlight the note's text in prose
       removePendingHighlights();
       const proseEl = getProseEl();
       if (proseEl) {
@@ -1519,38 +1773,23 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
         const span = proseEl.querySelector('[data-ann-id="' + editingNote.id + '"]');
         if (span) { span.classList.add('active'); span.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
       }
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-        setTimeout(() => { if (textareaRef.current) { textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'; } }, 0);
-      }
-    } else {
-      // Don't clear if there's an active text selection (new note flow)
-      if (!selTextRef.current) {
-        setComment('');
-        setSelText('');
-      }
+      setTimeout(() => autoResize(textareaRef.current), 0);
+    } else if (!selTextRef.current) {
+      setComment('');
+      setSelText('');
     }
   }, [editingNote]);
 
-  const autoResize = useCallback((el) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-  }, []);
-
-  // Track selection: single mouseup handler
+  // Track selection
   useEffect(() => {
     const onMouseUp = (e) => {
       setTimeout(() => {
-        if (e.target.closest && e.target.closest('.note-input-section')) return;
-        if (e.target.closest && e.target.closest('.notes-sidebar')) return;
-
+        if (e.target.closest && (e.target.closest('.note-input-section') || e.target.closest('.notes-sidebar'))) return;
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
           const proseEl = getProseEl();
           if (proseEl && proseEl.contains(sel.anchorNode)) {
             const text = sel.toString();
-            // New selection → clear any editing state, start fresh
             if (editingRef.current) onClearEditingRef.current();
             removePendingHighlights();
             applyOneAnnotation(proseEl, { id: '_pending', text: text.replace(/\\s+/g, ' ').trim() });
@@ -1561,7 +1800,6 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
             return;
           }
         }
-        // Clicked outside prose/sidebar without valid selection → deselect note
         if (editingRef.current) onClearEditingRef.current();
         removePendingHighlights();
         setSelText('');
@@ -1572,16 +1810,10 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
     return () => document.removeEventListener('mouseup', onMouseUp);
   }, []);
 
-  // Autosave: debounce 800ms after typing
   const flashStatus = useCallback((msg) => {
     setSaveStatus(msg);
-    setFading(false);
-    clearTimeout(statusTimerRef.current);
-    clearTimeout(fadeTimerRef.current);
-    // Start fading after a brief pause
-    statusTimerRef.current = setTimeout(() => setFading(true), 600);
-    // Clear text after fade completes
-    fadeTimerRef.current = setTimeout(() => { setSaveStatus(''); setFading(false); }, 2200);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setSaveStatus(''), 2000);
   }, []);
 
   const handleInput = useCallback((e) => {
@@ -1589,11 +1821,9 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
     setComment(val);
     autoResize(e.target);
     clearTimeout(saveTimerRef.current);
-    clearTimeout(statusTimerRef.current);
-    clearTimeout(fadeTimerRef.current);
-    setFading(false);
-    if (val.trim()) setSaveStatus('Unsaved');
-    else { setSaveStatus(''); return; }
+    clearTimeout(flashTimerRef.current);
+    if (!val.trim()) { setSaveStatus(''); return; }
+    setSaveStatus('Unsaved');
 
     saveTimerRef.current = setTimeout(async () => {
       const editing = editingRef.current;
@@ -1611,8 +1841,7 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
     }, 800);
   }, [onAdd, onUpdate, autoResize, flashStatus]);
 
-  // Clean up timers
-  useEffect(() => () => { clearTimeout(saveTimerRef.current); clearTimeout(statusTimerRef.current); clearTimeout(fadeTimerRef.current); }, []);
+  useEffect(() => () => { clearTimeout(saveTimerRef.current); clearTimeout(flashTimerRef.current); }, []);
 
   const quoteText = editingNote ? editingNote.text : selText;
   const hasContext = quoteText && quoteText.trim().length > 0;
@@ -1625,8 +1854,9 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
         value=\${comment}
         disabled=\${!hasContext}
         onInput=\${handleInput}
+        style=\${textareaHeightRef.current ? 'height:' + textareaHeightRef.current : ''}
       ></textarea>
-      <span class=\${'note-save-status' + (saveStatus === 'Unsaved' ? ' dirty' : '') + (fading ? ' fading' : '')}>\${saveStatus || '\\u00A0'}</span>
+      <span class=\${'note-save-status' + (saveStatus === 'Unsaved' ? ' dirty' : '')}>\${saveStatus || '\\u00A0'}</span>
     </div>\`;
 }
 
@@ -1738,13 +1968,14 @@ function NewFileBar({ visible }) {
 
 // ── Chat ──
 
-function ChatPanel({ getArticleText }) {
+function ChatPanel({ getArticleText, notes }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const streamingRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -1753,26 +1984,52 @@ function ChatPanel({ getArticleText }) {
   useEffect(() => { scrollToBottom(); }, [messages]);
   useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
 
+  const autoResize = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 96) + 'px';
+  }, []);
+
+  const handleInput = useCallback((e) => {
+    setInput(e.target.value);
+    autoResize();
+  }, [autoResize]);
+
+  // Render a single assistant message to HTML via marked, with optional streaming cursor
+  const renderAssistant = useCallback((content, isStreaming) => {
+    let html = marked.parse(content || '');
+    if (isStreaming) html += '<span class="chat-cursor"></span>';
+    return html;
+  }, []);
+
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text || streamingRef.current) return;
     const userMsg = { role: 'user', content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput('');
     setStreaming(true);
+    streamingRef.current = true;
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = '';
 
     try {
       const articleText = getArticleText ? getArticleText() : '';
+      const activeNotes = notes && notes.length
+        ? notes.filter(n => !n.resolved).map(n => ({ text: n.text, comment: n.comment }))
+        : undefined;
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages, articleContext: articleText }),
+        body: JSON.stringify({ messages: newMessages, articleContext: articleText, notesContext: activeNotes }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'request failed' }));
         setMessages(m => [...m, { role: 'error', content: err.error || 'request failed' }]);
         setStreaming(false);
+        streamingRef.current = false;
         return;
       }
       // Stream SSE
@@ -1812,7 +2069,8 @@ function ChatPanel({ getArticleText }) {
       setMessages(m => [...m, { role: 'error', content: 'Connection failed' }]);
     }
     setStreaming(false);
-  }, [input, messages, streaming, getArticleText]);
+    streamingRef.current = false;
+  }, [input, messages, getArticleText, notes]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -1834,18 +2092,24 @@ function ChatPanel({ getArticleText }) {
         </div>
       </div>
       <div class="chat-messages">
-        \${messages.length === 0 ? html\`<div class="chat-empty">Ask anything about this article</div>\` : null}
+        \${messages.length === 0 ? html\`<div class="chat-empty">Ask questions, request edits, or discuss this article</div>\` : null}
         \${messages.map((m, i) => m.role === 'error'
-          ? html\`<div key=\${i} class="chat-error">⚠ \${m.content}</div>\`
-          : html\`<div key=\${i} class=\${'chat-msg ' + m.role}>\${m.content}</div>\`
+          ? html\`<div key=\${i} class="chat-error">\u{26A0} \${m.content}</div>\`
+          : m.role === 'assistant'
+            ? html\`<div key=\${i} class="chat-msg assistant"
+                ref=\${el => { if (el) el.innerHTML = renderAssistant(m.content, streaming && i === messages.length - 1); }} />\`
+            : html\`<div key=\${i} class="chat-msg user">\${m.content}</div>\`
         )}
         <div ref=\${messagesEndRef} />
       </div>
-      <div class="chat-input-row">
-        <input ref=\${inputRef} value=\${input} onInput=\${e => setInput(e.target.value)}
-          onKeyDown=\${handleKeyDown} placeholder="Ask about this article…"
-          disabled=\${streaming} />
-        <button onClick=\${send} disabled=\${streaming || !input.trim()}>Send</button>
+      <div class="chat-input-area">
+        <div class="chat-input-row">
+          <textarea ref=\${inputRef} value=\${input} onInput=\${handleInput}
+            onKeyDown=\${handleKeyDown} placeholder="Ask about this article\u{2026}"
+            disabled=\${streaming} rows="1" />
+          <button onClick=\${send} disabled=\${streaming || !input.trim()}>Send</button>
+        </div>
+        <div class="chat-input-hint">Enter to send \u{00B7} Shift+Enter for newline</div>
       </div>
     </div>\`;
 }
@@ -2084,7 +2348,7 @@ function DocApp() {
       onSetAutoSave=\${setAutoSave} onSave=\${save} conflictState=\${conflictState}
       wordCount=\${wordCount} readTime=\${readTime} theme=\${theme} onToggleTheme=\${toggleTheme} />
     \${mode !== 'read' ? html\`<div class="top-bar-spacer"></div>\` : null}
-    <\${TocSidebar} mode=\${mode} cmEditorRef=\${cmEditorRef} tocVersion=\${tocVersion} />
+    <\${TocSidebar} mode=\${mode} cmEditorRef=\${cmEditorRef} tocVersion=\${tocVersion} markdown=\${markdown} isDirty=\${isDirty} />
     <div class="layout">
       <main class="main-col">
         <\${NewFileBar} visible=\${IS_NEW} />
@@ -2099,7 +2363,7 @@ function DocApp() {
     <\${NotesSidebar} notes=\${notes} onAdd=\${handleAddNote} onUpdate=\${handleUpdate}
       onResolve=\${handleResolve} onDelete=\${handleDelete} mode=\${mode}
       onNoteClick=\${handleNoteClick} />
-    <\${ChatPanel} getArticleText=\${getArticleText} />\`;
+    <\${ChatPanel} getArticleText=\${getArticleText} notes=\${notes} />\`;
 }
 
 render(html\`<\${DocApp} />\`, document.getElementById('app'));
@@ -2295,72 +2559,88 @@ async function handler(req: Request): Promise<Response> {
     return jsonResponse({ ok: true, path: rel });
   }
 
+  // POST /api/rename
+  if (method === "POST" && path === "/api/rename") {
+    const body = await req.json();
+    const fromRel: string = body.from || "";
+    const toName: string = body.toName || "";
+    if (!fromRel || !toName || !toName.endsWith(".md")) {
+      return jsonResponse({ error: "invalid parameters" }, 400);
+    }
+    const fromFp = safePath(fromRel);
+    if (!fromFp) return jsonResponse({ error: "path not allowed" }, 403);
+    // Preserve directory structure, only change the filename
+    const fromDir = dirname(fromRel);
+    let newRel = fromDir === "." ? toName : fromDir + "/" + toName;
+    let newFp = safePath(newRel);
+    if (!newFp) return jsonResponse({ error: "path not allowed" }, 403);
+    // If target already exists, append a short random suffix
+    try {
+      await Deno.stat(newFp);
+      const suffix = '_' + Math.random().toString(36).slice(2, 6);
+      const base = toName.replace(/\.md$/, '');
+      const suffixed = base + suffix + '.md';
+      newRel = fromDir === "." ? suffixed : fromDir + "/" + suffixed;
+      newFp = safePath(newRel);
+      if (!newFp) return jsonResponse({ error: "path not allowed" }, 403);
+    } catch {
+      // Good — target doesn't exist
+    }
+    try {
+      await Deno.rename(fromFp, newFp);
+      // Rename annotations sidecar if it exists
+      const annFrom = fromFp + ".annotations.json";
+      const annTo = newFp + ".annotations.json";
+      try {
+        await Deno.stat(annFrom);
+        await Deno.rename(annFrom, annTo);
+      } catch {
+        // No annotations file — that's fine
+      }
+      return jsonResponse({ ok: true, newPath: newRel });
+    } catch (e) {
+      return jsonResponse({ error: "rename failed: " + (e as Error).message }, 500);
+    }
+  }
+
   // POST /api/chat
   if (method === "POST" && path === "/api/chat") {
-    if (!ANTHROPIC_API_KEY) {
-      return jsonResponse({ error: "ANTHROPIC_API_KEY not set" }, 500);
+    if (!chatModel) {
+      return jsonResponse({ error: "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY)" }, 500);
     }
     const body = await req.json();
     const userMessages = (body.messages || []).map((m: { role: string; content: string }) => ({
-      role: m.role === 'user' ? 'user' : 'assistant',
+      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
     if (!userMessages.length) return jsonResponse({ error: "no messages" }, 400);
 
+    const notesBlock = body.notesContext && body.notesContext.length
+      ? `\n\nThe user has highlighted and annotated these passages:\n${body.notesContext.map((n: {text: string; comment?: string}, i: number) => `${i + 1}. Highlighted: "${n.text}"${n.comment ? ` — Note: "${n.comment}"` : ''}`).join('\n')}`
+      : '';
+
     const systemPrompt = body.articleContext
-      ? `You are a helpful reading assistant. The user is reading the following article and may ask questions about it. Be concise.\n\n<article>\n${body.articleContext}\n</article>`
-      : 'You are a helpful reading assistant. Be concise.';
+      ? `You are a reading, writing, and editing assistant for a markdown article. The user is actively working with this article — they may ask questions about its content, request edits or rewrites of specific sections, ask for summaries, fact-checking, style improvements, or structural help. Be concise but thorough. Use markdown formatting in your responses when helpful. When suggesting edits, quote the original passage and provide the replacement.\n\n<article>\n${body.articleContext}\n</article>${notesBlock}`
+      : 'You are a reading, writing, and editing assistant. Be concise but thorough. Use markdown formatting in your responses when helpful.';
 
     try {
-      const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages: userMessages,
-          stream: true,
-        }),
+      const result = streamText({
+        model: chatModel,
+        system: systemPrompt,
+        messages: userMessages,
+        maxTokens: 4096,
       });
-      if (!apiRes.ok) {
-        const err = await apiRes.text();
-        return jsonResponse({ error: `Anthropic API error: ${apiRes.status}` }, 502);
-      }
 
-      // Stream SSE back to client
+      const encoder = new TextEncoder();
       const stream = new ReadableStream({
         async start(controller) {
-          const reader = apiRes.body!.getReader();
-          const decoder = new TextDecoder();
-          let buf = '';
           try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buf += decoder.decode(value, { stream: true });
-              const lines = buf.split('\n');
-              buf = lines.pop() || '';
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6).trim();
-                  if (!data || data === '[DONE]') continue;
-                  try {
-                    const evt = JSON.parse(data);
-                    if (evt.type === 'content_block_delta' && evt.delta?.text) {
-                      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ text: evt.delta.text })}\n\n`));
-                    }
-                  } catch {}
-                }
-              }
+            for await (const chunk of result.textStream) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
             }
-            controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           } catch (e) {
-            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: 'stream error' })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'stream error' })}\n\n`));
           }
           controller.close();
         },
@@ -2374,7 +2654,7 @@ async function handler(req: Request): Promise<Response> {
         },
       });
     } catch (e) {
-      return jsonResponse({ error: 'Failed to reach Anthropic API' }, 502);
+      return jsonResponse({ error: 'Failed to reach LLM API' }, 502);
     }
   }
 
@@ -2472,5 +2752,6 @@ while (!tryPort(port) && port < PREFERRED_PORT + 100) port++;
 
 console.log(`mdmaster \u2192 http://localhost:${port}`);
 console.log(`  serving ${files.length} files from ${BASE_DIR}`);
+console.log(`  chat: ${ANTHROPIC_API_KEY ? 'Anthropic' : OPENAI_API_KEY ? 'OpenAI' : 'disabled (no API key)'}`);
 
 Deno.serve({ port, hostname: "127.0.0.1" }, handler);
