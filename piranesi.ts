@@ -2402,10 +2402,18 @@ function getMtime(stat: Deno.FileInfo): number | null {
 
 // ── Route handler ───────────────────────────────────────────────────────────────
 
-async function handler(req: Request): Promise<Response> {
+async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Response> {
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
   const method = req.method;
+
+  // Log page visits (HTML pages, not API/asset requests)
+  if (method === "GET" && (path === "/" || path.startsWith("/doc/"))) {
+    const ua = req.headers.get("user-agent") || "unknown";
+    const ip = info.remoteAddr.hostname;
+    const now = new Date().toISOString();
+    console.log(`[${now}] ${ip} GET ${path} — ${ua}`);
+  }
 
   // GET /
   if (method === "GET" && path === "/") {
