@@ -1,9 +1,9 @@
 #!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env
 /**
- * mdmaster — unified markdown reader/writer
+ * piranesi — unified markdown reader/writer
  * Single-file Deno server. Preact+htm client via CDN. No build step.
  *
- * Usage: deno run --allow-net --allow-read --allow-write mdmaster.ts [directory]
+ * Usage: deno run --allow-net --allow-read --allow-write piranesi.ts [directory]
  *        Defaults to working_data/
  */
 
@@ -84,10 +84,61 @@ const PROSE_CSS = `
 .prose a.section-ref { color: inherit; text-decoration: none; cursor: pointer; }
 .prose a.section-ref:hover { color: var(--accent); text-decoration: underline; }
 .prose .section-ref-sym { font-style: normal; color: var(--accent); font-size: 0.85em; vertical-align: baseline; position: relative; top: -0.05em; }
-.prose ul, .prose ol { margin: 0.4rem 0 0.85rem 1.25rem; }
-.prose li { margin-bottom: 0.25rem; }
-.prose li > ul, .prose li > ol { margin-top: 0.2rem; margin-bottom: 0.2rem; }
-.prose li::marker { color: var(--fg3); }
+.prose ul, .prose ol { margin: 0.4rem 0 0.85rem 1.5rem; }
+.prose li { margin-bottom: 0.3rem; }
+.prose li > ul, .prose li > ol { margin-top: 0.25rem; margin-bottom: 0.2rem; }
+.prose ul { list-style: none; padding-left: 0; }
+.prose ul > li { position: relative; padding-left: 1.25rem; }
+.prose ul > li::before {
+  content: ''; position: absolute; left: 0; top: 0.4em;
+  width: 0.55em; height: 0.55em;
+  background: var(--fg);
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 4v16l13-8z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 4v16l13-8z'/%3E%3C/svg%3E");
+}
+.prose ul > li > ul > li::before {
+  width: 0.5em; height: 0.5em; top: 0.42em;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.446 2.6l7.955 7.954a2.045 2.045 0 0 1 0 2.892l-7.955 7.955a2.045 2.045 0 0 1-2.892 0l-7.955-7.955a2.045 2.045 0 0 1 0-2.892l7.955-7.955a2.045 2.045 0 0 1 2.892 0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.446 2.6l7.955 7.954a2.045 2.045 0 0 1 0 2.892l-7.955 7.955a2.045 2.045 0 0 1-2.892 0l-7.955-7.955a2.045 2.045 0 0 1 0-2.892l7.955-7.955a2.045 2.045 0 0 1 2.892 0z'/%3E%3C/svg%3E");
+}
+.prose ul > li > ul > li > ul > li::before {
+  width: 0.5em; height: 0.5em; top: 0.42em;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.163 2.168l8.021 5.828c.694.504.984 1.397.719 2.212l-3.064 9.43a1.978 1.978 0 0 1-1.881 1.367h-9.916a1.978 1.978 0 0 1-1.881-1.367l-3.064-9.43a1.978 1.978 0 0 1 .719-2.212l8.021-5.828a1.978 1.978 0 0 1 2.326 0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.163 2.168l8.021 5.828c.694.504.984 1.397.719 2.212l-3.064 9.43a1.978 1.978 0 0 1-1.881 1.367h-9.916a1.978 1.978 0 0 1-1.881-1.367l-3.064-9.43a1.978 1.978 0 0 1 .719-2.212l8.021-5.828a1.978 1.978 0 0 1 2.326 0z'/%3E%3C/svg%3E");
+}
+.prose ul > li > ul > li > ul > li > ul > li::before {
+  width: 0.5em; height: 0.5em; top: 0.42em;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.875 6.27a2.225 2.225 0 0 1 1.125 1.948v7.284c0 .809-.443 1.555-1.158 1.948l-6.75 4.27a2.269 2.269 0 0 1-2.184 0l-6.75-4.27a2.225 2.225 0 0 1-1.158-1.948v-7.285c0-.809.443-1.554 1.158-1.947l6.75-3.98a2.33 2.33 0 0 1 2.25 0l6.75 3.98h-.033z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.875 6.27a2.225 2.225 0 0 1 1.125 1.948v7.284c0 .809-.443 1.555-1.158 1.948l-6.75 4.27a2.269 2.269 0 0 1-2.184 0l-6.75-4.27a2.225 2.225 0 0 1-1.158-1.948v-7.285c0-.809.443-1.554 1.158-1.947l6.75-3.98a2.33 2.33 0 0 1 2.25 0l6.75 3.98h-.033z'/%3E%3C/svg%3E");
+}
+.prose ul > li > ul > li > ul > li > ul > li > ul > li::before {
+  width: 0.45em; height: 0.45em; top: 0.44em;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0'/%3E%3C/svg%3E");
+}
+.prose .bullet-filled > li::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M6 4v16a1 1 0 0 0 1.524.852l13-8a1 1 0 0 0 0-1.704l-13-8A1 1 0 0 0 6 4z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M6 4v16a1 1 0 0 0 1.524.852l13-8a1 1 0 0 0 0-1.704l-13-8A1 1 0 0 0 6 4z'/%3E%3C/svg%3E");
+}
+.prose .bullet-filled > li > ul > li::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M9.793 2.893l-6.9 6.9c-1.172 1.171-1.172 3.243 0 4.414l6.9 6.9c1.171 1.172 3.243 1.172 4.414 0l6.9-6.9c1.172-1.171 1.172-3.243 0-4.414l-6.9-6.9c-1.171-1.172-3.243-1.172-4.414 0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M9.793 2.893l-6.9 6.9c-1.172 1.171-1.172 3.243 0 4.414l6.9 6.9c1.171 1.172 3.243 1.172 4.414 0l6.9-6.9c1.172-1.171 1.172-3.243 0-4.414l-6.9-6.9c-1.171-1.172-3.243-1.172-4.414 0z'/%3E%3C/svg%3E");
+}
+.prose .bullet-filled > li > ul > li > ul > li::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M10.205 2.6l-6.96 5.238a3 3 0 0 0-1.045 3.338l2.896 8.765a3 3 0 0 0 2.85 2.059h8.12a3 3 0 0 0 2.841-2.037l2.973-8.764a3 3 0 0 0-1.05-3.37l-7.033-5.237-.091-.061-.018-.01-.106-.07a3 3 0 0 0-3.377.148z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M10.205 2.6l-6.96 5.238a3 3 0 0 0-1.045 3.338l2.896 8.765a3 3 0 0 0 2.85 2.059h8.12a3 3 0 0 0 2.841-2.037l2.973-8.764a3 3 0 0 0-1.05-3.37l-7.033-5.237-.091-.061-.018-.01-.106-.07a3 3 0 0 0-3.377.148z'/%3E%3C/svg%3E");
+}
+.prose .bullet-filled > li > ul > li > ul > li > ul > li::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M10.425 1.414l-6.775 3.996a3.21 3.21 0 0 0-1.65 2.807v7.285a3.226 3.226 0 0 0 1.678 2.826l6.695 4.237c1.034.57 2.22.57 3.2.032l6.804-4.302c.98-.537 1.623-1.618 1.623-2.793v-7.284l-.005-.204a3.223 3.223 0 0 0-1.284-2.39l-.107-.075-.007-.007a1.074 1.074 0 0 0-.181-.133l-6.776-3.995a3.33 3.33 0 0 0-3.216 0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M10.425 1.414l-6.775 3.996a3.21 3.21 0 0 0-1.65 2.807v7.285a3.226 3.226 0 0 0 1.678 2.826l6.695 4.237c1.034.57 2.22.57 3.2.032l6.804-4.302c.98-.537 1.623-1.618 1.623-2.793v-7.284l-.005-.204a3.223 3.223 0 0 0-1.284-2.39l-.107-.075-.007-.007a1.074 1.074 0 0 0-.181-.133l-6.776-3.995a3.33 3.33 0 0 0-3.216 0z'/%3E%3C/svg%3E");
+}
+.prose .bullet-filled > li > ul > li > ul > li > ul > li > ul > li::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M7 3.34a10 10 0 1 1-4.995 8.984l-.005-.324.005-.324a10 10 0 0 1 4.995-8.336z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M7 3.34a10 10 0 1 1-4.995 8.984l-.005-.324.005-.324a10 10 0 0 1 4.995-8.336z'/%3E%3C/svg%3E");
+}
+.prose ol li::marker { color: var(--fg); }
 .prose blockquote {
   background: var(--blockquote-bg); border-left: 3px solid var(--blockquote-border);
   padding: 0.75rem 1.15rem; margin: 1rem 0; border-radius: 0 6px 6px 0;
@@ -451,7 +502,7 @@ const INDEX_CSS = `
   text-decoration: none; transition: border-color 0.2s;
 }
 .new-btn:hover { border-color: var(--fg2); }
-.file-table { width: 100%; border-collapse: collapse; }
+.file-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .file-table th {
   text-align: left; padding: 0.5rem 0.75rem; font-size: 0.72rem; font-weight: 600;
   color: var(--fg3); text-transform: uppercase; letter-spacing: 0.06em;
@@ -461,17 +512,16 @@ const INDEX_CSS = `
 .file-table th .sort-arrow { margin-left: 0.3rem; font-size: 0.65rem; }
 .file-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
 .file-table tr:hover td { background: var(--card-hover); }
-.file-table tr td:first-child { font-weight: 500; max-width: 420px; }
+.file-table tr td:first-child { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-table th:nth-child(2), .file-table th:nth-child(3) { width: 5.5rem; }
 .file-table a { color: var(--fg); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-table a:hover { color: var(--accent); }
 .file-meta-cell { color: var(--fg2); font-size: 0.82rem; white-space: nowrap; }
 .tree-dir-row { cursor: pointer; }
-.tree-dir-row td:first-child { font-weight: 500; display: flex; align-items: center; gap: 0.25rem; }
-.tree-dir-name { color: var(--fg); font-weight: 600; }
-.tree-toggle { display: inline-flex; align-items: center; color: var(--fg3); flex-shrink: 0; }
+.tree-dir-row td:first-child { font-weight: 500; }
+.tree-dir-label { display: inline-flex; align-items: center; gap: 0.25rem; }
 .tree-icon { display: inline-flex; align-items: center; color: var(--fg3); flex-shrink: 0; }
-.tree-file-cell { display: flex; align-items: center; gap: 0.4rem; }
-.tree-file-cell a { display: flex; align-items: center; gap: 0.4rem; }
+.tree-file-cell a { display: inline-flex; align-items: center; gap: 0.4rem; }
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
 .sort-arrow { display: inline-flex; align-items: center; vertical-align: middle; }
 `;
@@ -653,6 +703,7 @@ function shell(title: string, css: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='4' y='26' font-family='serif' font-size='28' font-weight='bold' fill='%23333'>P</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
 <style>${css}</style>
@@ -663,32 +714,42 @@ ${body}
 </html>`;
 }
 
-function indexPage(files: { rel: string; name: string; mtime: number; mins: number }[]): string {
+function indexPage(files: { rel: string; name: string; mtime: number; mins: number }[], relDir = ""): string {
   const label = basename(BASE_DIR);
   const filesJson = JSON.stringify(files);
-  return shell(`mdmaster / ${label}`, ALL_CSS, `
+  const segments = relDir.split("/").filter(Boolean);
+  const crumbs: { name: string; href: string }[] = [{ name: label, href: "/" }];
+  let acc = "";
+  for (const seg of segments) {
+    acc = acc ? acc + "/" + seg : seg;
+    crumbs.push({ name: seg, href: "/doc/" + acc + "/" });
+  }
+  const titleStr = relDir ? `${label} / ${relDir}` : label;
+  return shell(`${titleStr} — piranesi`, ALL_CSS, `
 <div id="app"></div>
 <script type="module">
 import { h, render } from 'https://esm.sh/preact@10';
 import { useState, useEffect, useCallback, useMemo } from 'https://esm.sh/preact@10/hooks';
 import htm from 'https://esm.sh/htm@3';
-import { IconSun, IconMoon, IconChevronRight, IconChevronDown, IconChevronUp, IconFolder, IconFolderOpen, IconFile } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconChevronRight,IconChevronDown,IconChevronUp,IconFolder,IconFolderOpen,IconFile';
+import { IconSun, IconMoon, IconChevronDown, IconChevronUp, IconFolder, IconFolderOpen, IconFile } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconChevronDown,IconChevronUp,IconFolder,IconFolderOpen,IconFile';
 const html = htm.bind(h);
 const ICON = { size: 16, stroke: 1.5 };
 
 const FILES = ${filesJson};
 const LABEL = ${JSON.stringify(label)};
+const CRUMBS = ${JSON.stringify(crumbs)};
+const REL_PREFIX = ${JSON.stringify(relDir ? relDir + "/" : "")};
 
 function useTheme() {
   const [theme, setThemeState] = useState(() => {
-    const s = localStorage.getItem('mdmaster-theme');
+    const s = localStorage.getItem('piranesi-theme');
     if (s) return s;
     if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
     return 'light';
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('mdmaster-theme', theme);
+    localStorage.setItem('piranesi-theme', theme);
   }, [theme]);
   const toggle = useCallback(() => setThemeState(t => t === 'dark' ? 'light' : 'dark'), []);
   return { theme, toggle };
@@ -712,6 +773,16 @@ function buildTree(files) {
   return root;
 }
 
+function newestMtime(node) {
+  let max = 0;
+  for (const f of node.files) if (f.mtime > max) max = f.mtime;
+  for (const k of Object.keys(node.dirs)) {
+    const m = newestMtime(node.dirs[k]);
+    if (m > max) max = m;
+  }
+  return max;
+}
+
 function sortFiles(files, sortCol, sortDir) {
   return files.slice().sort((a, b) => {
     let v;
@@ -727,14 +798,14 @@ function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, 
   const isCollapsed = collapsed[dirPath];
   const subdirs = Object.keys(node.dirs).sort((a, b) => a.localeCompare(b));
   const sortedFiles = sortFiles(node.files, sortCol, sortDir);
+  const dirMtime = newestMtime(node);
+  const dirDate = dirMtime ? new Date(dirMtime * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
   return html\`
-    <tr class="tree-dir-row" key=\${'dir:' + dirPath} onClick=\${() => onToggle(dirPath)}>
+    <tr class="tree-dir-row" key=\${'dir:' + dirPath} onClick=\${(e) => onToggle(dirPath, e.altKey)}>
       <td style=\${'padding-left: ' + (0.75 + depth * 1.25) + 'rem'}>
-        <span class="tree-toggle">\${isCollapsed ? html\`<\${IconChevronRight} ...\${ICON} />\` : html\`<\${IconChevronDown} ...\${ICON} />\`}</span>
-        <span class="tree-icon">\${isCollapsed ? html\`<\${IconFolder} ...\${ICON} />\` : html\`<\${IconFolderOpen} ...\${ICON} />\`}</span>
-        <span class="tree-dir-name">\${name}</span>
+        <span class="tree-dir-label"><span class="tree-icon">\${isCollapsed ? html\`<\${IconFolder} ...\${ICON} />\` : html\`<\${IconFolderOpen} ...\${ICON} />\`}</span>\${name}</span>
       </td>
-      <td class="file-meta-cell"></td>
+      <td class="file-meta-cell">\${dirDate}</td>
       <td class="file-meta-cell"></td>
     </tr>
     \${!isCollapsed && subdirs.map(sub => html\`
@@ -749,7 +820,7 @@ function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, 
         <tr key=\${f.rel}>
           <td style=\${'padding-left: ' + (0.75 + (depth + 1) * 1.25) + 'rem'} class="tree-file-cell">
             <span class="tree-icon"><\${IconFile} ...\${ICON} /></span>
-            <a href=\${'/doc/' + f.rel}>\${f.name}</a>
+            <a href=\${'/doc/' + REL_PREFIX + f.rel}>\${f.name}</a>
           </td>
           <td class="file-meta-cell">\${ds}</td>
           <td class="file-meta-cell">\${f.mins} min</td>
@@ -761,9 +832,30 @@ function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, 
 function FileTable({ files, sortCol, sortDir, onSort }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState({});
-  const onToggle = useCallback((path) => {
-    setCollapsed(prev => ({ ...prev, [path]: !prev[path] }));
-  }, []);
+  const onToggle = useCallback((path, altKey) => {
+    if (!altKey) {
+      setCollapsed(prev => ({ ...prev, [path]: !prev[path] }));
+      return;
+    }
+    // Alt-click: toggle all sibling dirs at the same level within the parent
+    const lastSlash = path.lastIndexOf('/');
+    const parentPrefix = lastSlash === -1 ? '' : path.substring(0, lastSlash);
+    let parentNode = tree;
+    if (parentPrefix) {
+      for (const seg of parentPrefix.split('/')) {
+        parentNode = parentNode.dirs[seg];
+        if (!parentNode) return;
+      }
+    }
+    const siblingNames = Object.keys(parentNode.dirs);
+    const siblingPaths = siblingNames.map(n => parentPrefix ? parentPrefix + '/' + n : n);
+    setCollapsed(prev => {
+      const next = { ...prev };
+      const newState = !prev[path];
+      for (const sp of siblingPaths) next[sp] = newState;
+      return next;
+    });
+  }, [tree]);
 
   const arrow = (col) => sortCol === col ? (sortDir === 1 ? html\`<\${IconChevronUp} size=\${14} stroke=\${1.5} />\` : html\`<\${IconChevronDown} size=\${14} stroke=\${1.5} />\`) : '';
   const subdirs = Object.keys(tree.dirs).sort((a, b) => a.localeCompare(b));
@@ -789,7 +881,7 @@ function FileTable({ files, sortCol, sortDir, onSort }) {
           const ds = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
           return html\`
             <tr key=\${f.rel}>
-              <td class="tree-file-cell"><span class="tree-icon"><\${IconFile} ...\${ICON} /></span><a href=\${'/doc/' + f.rel}>\${f.name}</a></td>
+              <td class="tree-file-cell"><span class="tree-icon"><\${IconFile} ...\${ICON} /></span><a href=\${'/doc/' + REL_PREFIX + f.rel}>\${f.name}</a></td>
               <td class="file-meta-cell">\${ds}</td>
               <td class="file-meta-cell">\${f.mins} min</td>
             </tr>\`;
@@ -811,10 +903,17 @@ function IndexApp() {
     });
   }, []);
 
+  const title = CRUMBS.length <= 1
+    ? html\`\${LABEL}\`
+    : html\`\${CRUMBS.map((c, i) => {
+        const isLast = i === CRUMBS.length - 1;
+        return html\`<\${isLast ? 'span' : 'a'} href=\${c.href}>\${c.name}</\${isLast ? 'span' : 'a'}>\${isLast ? '' : ' / '}\`;
+      })}\`;
+
   return html\`
     <div class="index-container">
       <header class="index-header">
-        <h1>mdmaster <span>/ \${LABEL}</span></h1>
+        <h1>\${title}</h1>
         <div class="header-controls">
           <a class="new-btn" href="/new">+ New</a>
           <\${ThemeToggle} theme=\${theme} onToggle=\${toggle} />
@@ -828,141 +927,8 @@ render(html\`<\${IndexApp} />\`, document.getElementById('app'));
 </script>`);
 }
 
-function dirPage(relDir: string, entries: DirEntry[]): string {
-  const label = basename(BASE_DIR);
-  const entriesJson = JSON.stringify(entries);
-  const segments = relDir.split("/").filter(Boolean);
-  // Build breadcrumb: [{ name, href }] starting with the root.
-  const crumbs: { name: string; href: string }[] = [{ name: label, href: "/" }];
-  let acc = "";
-  for (const seg of segments) {
-    acc = acc ? acc + "/" + seg : seg;
-    crumbs.push({ name: seg, href: "/doc/" + acc + "/" });
-  }
-  const crumbsJson = JSON.stringify(crumbs);
-  const titleStr = relDir ? `${label} / ${relDir}` : label;
-  return shell(`mdmaster / ${titleStr}`, ALL_CSS, `
-<div id="app"></div>
-<script type="module">
-import { h, render } from 'https://esm.sh/preact@10';
-import { useState, useEffect, useCallback, useMemo } from 'https://esm.sh/preact@10/hooks';
-import htm from 'https://esm.sh/htm@3';
-import { IconSun, IconMoon, IconChevronUp, IconChevronDown, IconFolder, IconFile } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconChevronUp,IconChevronDown,IconFolder,IconFile';
-const html = htm.bind(h);
-const ICON = { size: 16, stroke: 1.5 };
-
-const ENTRIES = ${entriesJson};
-const CRUMBS = ${crumbsJson};
-
-function useTheme() {
-  const [theme, setThemeState] = useState(() => {
-    const s = localStorage.getItem('mdmaster-theme');
-    if (s) return s;
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
-    return 'light';
-  });
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('mdmaster-theme', theme);
-  }, [theme]);
-  const toggle = useCallback(() => setThemeState(t => t === 'dark' ? 'light' : 'dark'), []);
-  return { theme, toggle };
-}
-
-function ThemeToggle({ theme, onToggle }) {
-  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? html\`<\${IconSun} ...\${ICON} />\` : html\`<\${IconMoon} ...\${ICON} />\`}</button>\`;
-}
-
-function DirTable({ entries, sortCol, sortDir, onSort }) {
-  const arrow = (col) => sortCol === col ? (sortDir === 1 ? html\`<\${IconChevronUp} size=\${14} stroke=\${1.5} />\` : html\`<\${IconChevronDown} size=\${14} stroke=\${1.5} />\`) : '';
-  return html\`
-    <table class="file-table">
-      <thead>
-        <tr>
-          <th onClick=\${() => onSort('name')}>Name <span class="sort-arrow">\${arrow('name')}</span></th>
-          <th onClick=\${() => onSort('modified')}>Modified <span class="sort-arrow">\${arrow('modified')}</span></th>
-          <th onClick=\${() => onSort('read')}>Read <span class="sort-arrow">\${arrow('read')}</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        \${entries.map(e => {
-          const d = e.mtime ? new Date(e.mtime * 1000) : null;
-          const ds = d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-          if (e.kind === 'dir') {
-            return html\`
-              <tr key=\${'d:' + e.rel}>
-                <td class="tree-file-cell"><a href=\${'/doc/' + e.rel + '/'}><span class="tree-icon"><\${IconFolder} ...\${ICON} /></span>\${e.name}</a></td>
-                <td class="file-meta-cell">\${ds}</td>
-                <td class="file-meta-cell">—</td>
-              </tr>\`;
-          }
-          return html\`
-            <tr key=\${'f:' + e.rel}>
-              <td class="tree-file-cell"><a href=\${'/doc/' + e.rel}><span class="tree-icon"><\${IconFile} ...\${ICON} /></span>\${e.name}</a></td>
-              <td class="file-meta-cell">\${ds}</td>
-              <td class="file-meta-cell">\${e.mins} min</td>
-            </tr>\`;
-        })}
-      </tbody>
-    </table>\`;
-}
-
-function Breadcrumbs({ crumbs }) {
-  return html\`
-    <h1>mdmaster <span>/ \${crumbs.map((c, i) => {
-      const isLast = i === crumbs.length - 1;
-      return html\`<\${isLast ? 'span' : 'a'} href=\${c.href}>\${c.name}\</\${isLast ? 'span' : 'a'}>\${isLast ? '' : ' / '}\`;
-    })}</span></h1>\`;
-}
-
-function DirApp() {
-  const { theme, toggle } = useTheme();
-  const [sortCol, setSortCol] = useState('name');
-  const [sortDir, setSortDir] = useState(1);
-
-  const handleSort = useCallback((col) => {
-    setSortCol(prev => {
-      if (prev === col) { setSortDir(d => d * -1); return col; }
-      setSortDir(col === 'modified' ? -1 : 1);
-      return col;
-    });
-  }, []);
-
-  const sorted = useMemo(() => {
-    // Always keep directories before files, then sort within each group.
-    const dirs = ENTRIES.filter(e => e.kind === 'dir').slice();
-    const files = ENTRIES.filter(e => e.kind === 'file').slice();
-    const cmp = (a, b) => {
-      let v;
-      if (sortCol === 'name') v = a.name.localeCompare(b.name);
-      else if (sortCol === 'modified') v = (a.mtime || 0) - (b.mtime || 0);
-      else if (sortCol === 'read') v = ((a.mins || 0) - (b.mins || 0));
-      return v * sortDir;
-    };
-    dirs.sort(cmp);
-    files.sort(cmp);
-    return [...dirs, ...files];
-  }, [sortCol, sortDir]);
-
-  return html\`
-    <div class="index-container">
-      <header class="index-header">
-        <\${Breadcrumbs} crumbs=\${CRUMBS} />
-        <div class="header-controls">
-          <a class="new-btn" href="/new">+ New</a>
-          <\${ThemeToggle} theme=\${theme} onToggle=\${toggle} />
-        </div>
-      </header>
-      <\${DirTable} entries=\${sorted} sortCol=\${sortCol} sortDir=\${sortDir} onSort=\${handleSort} />
-    </div>\`;
-}
-
-render(html\`<\${DirApp} />\`, document.getElementById('app'));
-</script>`);
-}
-
 function docPage(title: string, filePath: string): string {
-  return shell(`${esc(title)} \u2014 mdmaster`, ALL_CSS, `
+  return shell(`${esc(title)} \u2014 piranesi`, ALL_CSS, `
 <div id="app"></div>
 <script type="importmap">
 {
@@ -1021,6 +987,21 @@ function evalMathExpr(expr) {
 
 marked.use({
   renderer: {
+    list(token) {
+      const tag = token.ordered ? 'ol' : 'ul';
+      const startAttr = token.ordered && token.start !== 1 ? ' start="' + token.start + '"' : '';
+      // Detect bullet marker from raw source: * = filled, - = outline (default)
+      let filledClass = '';
+      if (!token.ordered && token.items && token.items.length > 0) {
+        const raw = token.items[0].raw;
+        if (raw && raw.trimStart().startsWith('* ')) filledClass = ' class="bullet-filled"';
+      }
+      let body = '';
+      for (let j = 0; j < token.items.length; j++) {
+        body += this.listitem(token.items[j]);
+      }
+      return '<' + tag + startAttr + filledClass + '>\\n' + body + '</' + tag + '>\\n';
+    },
     codespan(token) {
       const text = typeof token === 'object' ? token.text : token;
       if (text.startsWith('= ')) {
@@ -1282,6 +1263,19 @@ function htmlToMarkdown(el) {
   if (!tdInstance) {
     tdInstance = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', emDelimiter: '*', strongDelimiter: '**', bulletListMarker: '-' });
     tdInstance.use(turndownGfm);
+    tdInstance.addRule('bulletFilledListItem', {
+      filter: node => {
+        if (node.nodeName !== 'LI') return false;
+        const parent = node.parentElement;
+        return parent && parent.nodeName === 'UL' && parent.classList.contains('bullet-filled');
+      },
+      replacement: (content, node) => {
+        content = content.replace(/^\\n+/, '').replace(/\\n+$/, '\\n');
+        // Indent continuation lines
+        content = content.replace(/\\n(?!$)/g, '\\n    ');
+        return '* ' + content.trimStart() + (node.nextElementSibling ? '\\n' : '');
+      }
+    });
     tdInstance.addRule('annotations', {
       filter: node => node.nodeName === 'SPAN' && node.classList.contains('annotated'),
       replacement: content => content
@@ -1370,14 +1364,14 @@ function useLatest(value) {
 
 function useTheme() {
   const [theme, setThemeState] = useState(() => {
-    const s = localStorage.getItem('mdmaster-theme');
+    const s = localStorage.getItem('piranesi-theme');
     if (s) return s;
     if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
     return 'light';
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('mdmaster-theme', theme);
+    localStorage.setItem('piranesi-theme', theme);
   }, [theme]);
   const toggle = useCallback(() => setThemeState(t => t === 'dark' ? 'light' : 'dark'), []);
   return { theme, toggle };
@@ -1771,6 +1765,112 @@ function RawEditor({ markdown, onDirty, cmEditorRef, cmThemeCompRef, theme }) {
   return html\`<div id="cm-wrap" ref=\${wrapRef} style="display:block"></div>\`;
 }
 
+// ── List indent/outdent helpers for contenteditable ──
+
+function closestLi(node, root) {
+  let n = node;
+  while (n && n !== root) {
+    if (n.nodeName === 'LI') return n;
+    n = n.parentElement;
+  }
+  return null;
+}
+
+function indentLi(li) {
+  const prev = li.previousElementSibling;
+  if (!prev || prev.nodeName !== 'LI') return false;
+  const parentList = li.parentElement;
+  if (!parentList || (parentList.nodeName !== 'UL' && parentList.nodeName !== 'OL')) return false;
+  const listTag = parentList.nodeName.toLowerCase();
+
+  // Save cursor position relative to li's text content
+  const sel = window.getSelection();
+  let cursorOffset = null;
+  if (sel.rangeCount) {
+    const r = sel.getRangeAt(0);
+    try { cursorOffset = { node: r.startContainer, offset: r.startOffset }; } catch (_) {}
+  }
+
+  // Find existing sub-list at end of prev, or create one
+  const lastChild = prev.lastElementChild;
+  let subList = (lastChild && (lastChild.nodeName === 'UL' || lastChild.nodeName === 'OL')) ? lastChild : null;
+  if (!subList) {
+    subList = document.createElement(listTag);
+    if (parentList.classList.contains('bullet-filled')) subList.classList.add('bullet-filled');
+    prev.appendChild(subList);
+  }
+  subList.appendChild(li);
+
+  // Restore cursor
+  if (cursorOffset) {
+    try {
+      const r = document.createRange();
+      r.setStart(cursorOffset.node, cursorOffset.offset);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) {}
+  }
+  return true;
+}
+
+function outdentLi(li) {
+  const parentList = li.parentElement;
+  if (!parentList || (parentList.nodeName !== 'UL' && parentList.nodeName !== 'OL')) return false;
+  const grandLi = parentList.parentElement;
+  if (!grandLi || grandLi.nodeName !== 'LI') return false;
+  const grandList = grandLi.parentElement;
+  if (!grandList) return false;
+
+  // Save cursor
+  const sel = window.getSelection();
+  let cursorOffset = null;
+  if (sel.rangeCount) {
+    const r = sel.getRangeAt(0);
+    try { cursorOffset = { node: r.startContainer, offset: r.startOffset }; } catch (_) {}
+  }
+
+  // Collect siblings that come after this li — they need to stay nested
+  const siblingsAfter = [];
+  let sib = li.nextElementSibling;
+  while (sib) {
+    const next = sib.nextElementSibling; // grab before DOM mutation
+    siblingsAfter.push(sib);
+    sib = next;
+  }
+  if (siblingsAfter.length > 0) {
+    // If li already has a child sub-list, append to it; otherwise create one
+    const existingSub = li.lastElementChild;
+    let target;
+    if (existingSub && (existingSub.nodeName === 'UL' || existingSub.nodeName === 'OL')) {
+      target = existingSub;
+    } else {
+      target = document.createElement(parentList.nodeName.toLowerCase());
+      if (parentList.classList.contains('bullet-filled')) target.classList.add('bullet-filled');
+      li.appendChild(target);
+    }
+    siblingsAfter.forEach(s => target.appendChild(s));
+  }
+
+  // Move li up one level, after grandLi
+  grandList.insertBefore(li, grandLi.nextSibling);
+
+  // Clean up empty parent list
+  if (parentList.children.length === 0) parentList.remove();
+
+  // Restore cursor
+  if (cursorOffset) {
+    try {
+      const r = document.createRange();
+      r.setStart(cursorOffset.node, cursorOffset.offset);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) {}
+  }
+  return true;
+}
+
 function FormattedEditor({ markdown, notes, onDirty, renderVersion }) {
   const ref = useRef(null);
   // Only re-render the contenteditable's innerHTML when explicitly asked
@@ -1789,8 +1889,20 @@ function FormattedEditor({ markdown, notes, onDirty, renderVersion }) {
     applyAnnotations(ref.current, notesRef.current, null); // view-only highlights in edit mode
     ref.current.focus();
   }, [renderVersion]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key !== 'Tab') return;
+    const sel = window.getSelection();
+    if (!sel.anchorNode || !ref.current) return;
+    const li = closestLi(sel.anchorNode, ref.current);
+    if (!li) return; // not inside a list item — let browser handle
+    e.preventDefault();
+    const changed = e.shiftKey ? outdentLi(li) : indentLi(li);
+    if (changed) onDirty();
+  }, [onDirty]);
+
   return html\`<article class="prose" id="formatted-editor" contenteditable="true" ref=\${ref}
-    style="display:block" onInput=\${onDirty}></article>\`;
+    style="display:block" onInput=\${onDirty} onKeyDown=\${handleKeyDown}></article>\`;
 }
 
 function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEditing, onSelTextChange, onNoteCreated }) {
@@ -2465,8 +2577,9 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
           headers: { Location: "/doc/" + rel + "/" },
         });
       }
-      const entries = await collectDirEntries(fp, rel);
-      return htmlResponse(dirPage(rel, entries));
+      const files: { rel: string; name: string; mtime: number; mins: number }[] = [];
+      await collectFiles(fp, "", files);
+      return htmlResponse(indexPage(files, rel));
     }
     const name = basename(fp, ".md");
     const title = name.replace(/[_-]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -2707,38 +2820,6 @@ async function collectFiles(
   }
 }
 
-type DirEntry =
-  | { kind: "dir"; rel: string; name: string; mtime: number }
-  | { kind: "file"; rel: string; name: string; mtime: number; mins: number };
-
-async function collectDirEntries(absDir: string, relDir: string): Promise<DirEntry[]> {
-  const out: DirEntry[] = [];
-  for await (const entry of Deno.readDir(absDir)) {
-    const rel = relDir ? relDir + "/" + entry.name : entry.name;
-    const fp = join(absDir, entry.name);
-    if (entry.isDirectory) {
-      let mtime = 0;
-      try {
-        const st = await Deno.stat(fp);
-        mtime = getMtime(st) || 0;
-      } catch { /* ignore */ }
-      out.push({ kind: "dir", rel, name: entry.name, mtime });
-    } else if (entry.isFile && entry.name.endsWith(".md") && !entry.name.endsWith(".annotations.json")) {
-      const stat = await Deno.stat(fp);
-      const content = await Deno.readTextFile(fp);
-      const words = content.split(/\s+/).filter(w => w).length;
-      out.push({
-        kind: "file",
-        rel,
-        name: entry.name.replace(/\.md$/, ""),
-        mtime: getMtime(stat) || 0,
-        mins: Math.max(1, Math.ceil(words / 238)),
-      });
-    }
-  }
-  return out;
-}
-
 // ── Server ──────────────────────────────────────────────────────────────────────
 
 // Verify base dir exists
@@ -2776,7 +2857,7 @@ function tryPort(port: number): boolean {
 let port = PREFERRED_PORT;
 while (!tryPort(port) && port < PREFERRED_PORT + 100) port++;
 
-console.log(`mdmaster \u2192 http://localhost:${port}`);
+console.log(`piranesi \u2192 http://localhost:${port}`);
 console.log(`  serving ${fileCount} files from ${BASE_DIR}`);
 console.log(`  chat: ${ANTHROPIC_API_KEY ? 'Anthropic' : OPENAI_API_KEY ? 'OpenAI' : 'disabled (no API key)'}`);
 
