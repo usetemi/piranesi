@@ -312,18 +312,6 @@ const EDITOR_CSS = `
 #cm-wrap .cm-editor .\\u0361\\u0335a { font-style: italic; }
 /* Formatted / WYSIWYG editor */
 #formatted-editor { margin-top: 1rem; outline: none; min-height: calc(100vh - 8rem); }
-/* New file bar */
-.new-file-bar {
-  display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem;
-  padding: 0.75rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
-}
-.new-file-bar input {
-  flex: 1; border: 1px solid var(--border); border-radius: 6px;
-  padding: 0.4rem 0.6rem; font-size: 0.85rem; font-family: inherit;
-  background: var(--bg); color: var(--fg);
-}
-.new-file-bar input:focus { outline: none; border-color: var(--accent); }
-.new-file-bar span { color: var(--fg2); font-size: 0.82rem; }
 `;
 
 const ANNOTATION_CSS = `
@@ -477,6 +465,15 @@ const INDEX_CSS = `
 .file-table a { color: var(--fg); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-table a:hover { color: var(--accent); }
 .file-meta-cell { color: var(--fg2); font-size: 0.82rem; white-space: nowrap; }
+.tree-dir-row { cursor: pointer; }
+.tree-dir-row td:first-child { font-weight: 500; display: flex; align-items: center; gap: 0.25rem; }
+.tree-dir-name { color: var(--fg); font-weight: 600; }
+.tree-toggle { display: inline-flex; align-items: center; color: var(--fg3); flex-shrink: 0; }
+.tree-icon { display: inline-flex; align-items: center; color: var(--fg3); flex-shrink: 0; }
+.tree-file-cell { display: flex; align-items: center; gap: 0.4rem; }
+.tree-file-cell a { display: flex; align-items: center; gap: 0.4rem; }
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
+.sort-arrow { display: inline-flex; align-items: center; vertical-align: middle; }
 `;
 
 const CHAT_CSS = `
@@ -675,7 +672,9 @@ function indexPage(files: { rel: string; name: string; mtime: number; mins: numb
 import { h, render } from 'https://esm.sh/preact@10';
 import { useState, useEffect, useCallback, useMemo } from 'https://esm.sh/preact@10/hooks';
 import htm from 'https://esm.sh/htm@3';
+import { IconSun, IconMoon, IconChevronRight, IconChevronDown, IconChevronUp, IconFolder, IconFolderOpen, IconFile } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconChevronRight,IconChevronDown,IconChevronUp,IconFolder,IconFolderOpen,IconFile';
 const html = htm.bind(h);
+const ICON = { size: 16, stroke: 1.5 };
 
 const FILES = ${filesJson};
 const LABEL = ${JSON.stringify(label)};
@@ -696,11 +695,80 @@ function useTheme() {
 }
 
 function ThemeToggle({ theme, onToggle }) {
-  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19'}</button>\`;
+  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? html\`<\${IconSun} ...\${ICON} />\` : html\`<\${IconMoon} ...\${ICON} />\`}</button>\`;
+}
+
+function buildTree(files) {
+  const root = { dirs: {}, files: [] };
+  for (const f of files) {
+    const parts = f.rel.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.dirs[parts[i]]) node.dirs[parts[i]] = { dirs: {}, files: [] };
+      node = node.dirs[parts[i]];
+    }
+    node.files.push(f);
+  }
+  return root;
+}
+
+function sortFiles(files, sortCol, sortDir) {
+  return files.slice().sort((a, b) => {
+    let v;
+    if (sortCol === 'name') v = a.name.localeCompare(b.name);
+    else if (sortCol === 'modified') v = a.mtime - b.mtime;
+    else if (sortCol === 'read') v = a.mins - b.mins;
+    return v * sortDir;
+  });
+}
+
+function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, sortDir }) {
+  const dirPath = pathPrefix ? pathPrefix + '/' + name : name;
+  const isCollapsed = collapsed[dirPath];
+  const subdirs = Object.keys(node.dirs).sort((a, b) => a.localeCompare(b));
+  const sortedFiles = sortFiles(node.files, sortCol, sortDir);
+  return html\`
+    <tr class="tree-dir-row" key=\${'dir:' + dirPath} onClick=\${() => onToggle(dirPath)}>
+      <td style=\${'padding-left: ' + (0.75 + depth * 1.25) + 'rem'}>
+        <span class="tree-toggle">\${isCollapsed ? html\`<\${IconChevronRight} ...\${ICON} />\` : html\`<\${IconChevronDown} ...\${ICON} />\`}</span>
+        <span class="tree-icon">\${isCollapsed ? html\`<\${IconFolder} ...\${ICON} />\` : html\`<\${IconFolderOpen} ...\${ICON} />\`}</span>
+        <span class="tree-dir-name">\${name}</span>
+      </td>
+      <td class="file-meta-cell"></td>
+      <td class="file-meta-cell"></td>
+    </tr>
+    \${!isCollapsed && subdirs.map(sub => html\`
+      <\${TreeDir} name=\${sub} node=\${node.dirs[sub]} depth=\${depth + 1}
+        collapsed=\${collapsed} onToggle=\${onToggle} pathPrefix=\${dirPath}
+        sortCol=\${sortCol} sortDir=\${sortDir} />
+    \`)}
+    \${!isCollapsed && sortedFiles.map(f => {
+      const d = new Date(f.mtime * 1000);
+      const ds = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      return html\`
+        <tr key=\${f.rel}>
+          <td style=\${'padding-left: ' + (0.75 + (depth + 1) * 1.25) + 'rem'} class="tree-file-cell">
+            <span class="tree-icon"><\${IconFile} ...\${ICON} /></span>
+            <a href=\${'/doc/' + f.rel}>\${f.name}</a>
+          </td>
+          <td class="file-meta-cell">\${ds}</td>
+          <td class="file-meta-cell">\${f.mins} min</td>
+        </tr>\`;
+    })}
+  \`;
 }
 
 function FileTable({ files, sortCol, sortDir, onSort }) {
-  const arrow = (col) => sortCol === col ? (sortDir === 1 ? '\\u25B2' : '\\u25BC') : '';
+  const tree = useMemo(() => buildTree(files), [files]);
+  const [collapsed, setCollapsed] = useState({});
+  const onToggle = useCallback((path) => {
+    setCollapsed(prev => ({ ...prev, [path]: !prev[path] }));
+  }, []);
+
+  const arrow = (col) => sortCol === col ? (sortDir === 1 ? html\`<\${IconChevronUp} size=\${14} stroke=\${1.5} />\` : html\`<\${IconChevronDown} size=\${14} stroke=\${1.5} />\`) : '';
+  const subdirs = Object.keys(tree.dirs).sort((a, b) => a.localeCompare(b));
+  const rootFiles = sortFiles(tree.files, sortCol, sortDir);
+
   return html\`
     <table class="file-table">
       <thead>
@@ -711,12 +779,17 @@ function FileTable({ files, sortCol, sortDir, onSort }) {
         </tr>
       </thead>
       <tbody>
-        \${files.map(f => {
+        \${subdirs.map(name => html\`
+          <\${TreeDir} name=\${name} node=\${tree.dirs[name]} depth=\${0}
+            collapsed=\${collapsed} onToggle=\${onToggle} pathPrefix=\${''}
+            sortCol=\${sortCol} sortDir=\${sortDir} />
+        \`)}
+        \${rootFiles.map(f => {
           const d = new Date(f.mtime * 1000);
           const ds = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
           return html\`
             <tr key=\${f.rel}>
-              <td><a href=\${'/doc/' + f.rel}>\${f.name}</a></td>
+              <td class="tree-file-cell"><span class="tree-icon"><\${IconFile} ...\${ICON} /></span><a href=\${'/doc/' + f.rel}>\${f.name}</a></td>
               <td class="file-meta-cell">\${ds}</td>
               <td class="file-meta-cell">\${f.mins} min</td>
             </tr>\`;
@@ -727,8 +800,8 @@ function FileTable({ files, sortCol, sortDir, onSort }) {
 
 function IndexApp() {
   const { theme, toggle } = useTheme();
-  const [sortCol, setSortCol] = useState('modified');
-  const [sortDir, setSortDir] = useState(-1);
+  const [sortCol, setSortCol] = useState('name');
+  const [sortDir, setSortDir] = useState(1);
 
   const handleSort = useCallback((col) => {
     setSortCol(prev => {
@@ -737,16 +810,6 @@ function IndexApp() {
       return col;
     });
   }, []);
-
-  const sorted = useMemo(() => {
-    return FILES.slice().sort((a, b) => {
-      let v;
-      if (sortCol === 'name') v = a.name.localeCompare(b.name);
-      else if (sortCol === 'modified') v = a.mtime - b.mtime;
-      else if (sortCol === 'read') v = a.mins - b.mins;
-      return v * sortDir;
-    });
-  }, [sortCol, sortDir]);
 
   return html\`
     <div class="index-container">
@@ -757,7 +820,7 @@ function IndexApp() {
           <\${ThemeToggle} theme=\${theme} onToggle=\${toggle} />
         </div>
       </header>
-      <\${FileTable} files=\${sorted} sortCol=\${sortCol} sortDir=\${sortDir} onSort=\${handleSort} />
+      <\${FileTable} files=\${FILES} sortCol=\${sortCol} sortDir=\${sortDir} onSort=\${handleSort} />
     </div>\`;
 }
 
@@ -784,7 +847,9 @@ function dirPage(relDir: string, entries: DirEntry[]): string {
 import { h, render } from 'https://esm.sh/preact@10';
 import { useState, useEffect, useCallback, useMemo } from 'https://esm.sh/preact@10/hooks';
 import htm from 'https://esm.sh/htm@3';
+import { IconSun, IconMoon, IconChevronUp, IconChevronDown, IconFolder, IconFile } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconChevronUp,IconChevronDown,IconFolder,IconFile';
 const html = htm.bind(h);
+const ICON = { size: 16, stroke: 1.5 };
 
 const ENTRIES = ${entriesJson};
 const CRUMBS = ${crumbsJson};
@@ -805,11 +870,11 @@ function useTheme() {
 }
 
 function ThemeToggle({ theme, onToggle }) {
-  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19'}</button>\`;
+  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? html\`<\${IconSun} ...\${ICON} />\` : html\`<\${IconMoon} ...\${ICON} />\`}</button>\`;
 }
 
 function DirTable({ entries, sortCol, sortDir, onSort }) {
-  const arrow = (col) => sortCol === col ? (sortDir === 1 ? '\\u25B2' : '\\u25BC') : '';
+  const arrow = (col) => sortCol === col ? (sortDir === 1 ? html\`<\${IconChevronUp} size=\${14} stroke=\${1.5} />\` : html\`<\${IconChevronDown} size=\${14} stroke=\${1.5} />\`) : '';
   return html\`
     <table class="file-table">
       <thead>
@@ -826,14 +891,14 @@ function DirTable({ entries, sortCol, sortDir, onSort }) {
           if (e.kind === 'dir') {
             return html\`
               <tr key=\${'d:' + e.rel}>
-                <td><a href=\${'/doc/' + e.rel + '/'}>\${'\\uD83D\\uDCC1 ' + e.name}</a></td>
+                <td class="tree-file-cell"><a href=\${'/doc/' + e.rel + '/'}><span class="tree-icon"><\${IconFolder} ...\${ICON} /></span>\${e.name}</a></td>
                 <td class="file-meta-cell">\${ds}</td>
                 <td class="file-meta-cell">—</td>
               </tr>\`;
           }
           return html\`
             <tr key=\${'f:' + e.rel}>
-              <td><a href=\${'/doc/' + e.rel}>\${e.name}</a></td>
+              <td class="tree-file-cell"><a href=\${'/doc/' + e.rel}><span class="tree-icon"><\${IconFile} ...\${ICON} /></span>\${e.name}</a></td>
               <td class="file-meta-cell">\${ds}</td>
               <td class="file-meta-cell">\${e.mins} min</td>
             </tr>\`;
@@ -920,15 +985,17 @@ import { marked } from 'https://esm.sh/marked@15';
 import markedFootnote from 'https://esm.sh/marked-footnote@1';
 import TurndownService from 'https://esm.sh/turndown@7';
 import { gfm as turndownGfm } from 'https://esm.sh/@joplin/turndown-plugin-gfm@1';
+import { IconSun, IconMoon, IconPlus, IconMinus, IconArrowsMaximize, IconArrowsMinimize } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconPlus,IconMinus,IconArrowsMaximize,IconArrowsMinimize';
 import { basicSetup, EditorView } from 'codemirror';
 import { EditorState, Compartment } from '@codemirror/state';
 import { markdown as mdLang } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 const html = htm.bind(h);
+const ICON = { size: 16, stroke: 1.5 };
 const CM = { EditorView, EditorState, basicSetup, markdown: mdLang, oneDark, Compartment };
+const CHAT_ENABLED = ${chatModel ? 'true' : 'false'};
 
 const FILE_PATH = ${JSON.stringify(filePath)};
-const IS_NEW = FILE_PATH === '__new__';
 
 // ── marked setup (once) ──
 marked.setOptions({ gfm: true, breaks: false });
@@ -968,15 +1035,6 @@ marked.use({
   }
 });
 
-// ── Annotation color palette ──
-const ANNOTATION_COLORS = {
-  yellow: { light: 'rgba(251,191,36,0.25)', lightHover: 'rgba(251,191,36,0.45)', dark: 'rgba(251,191,36,0.3)', darkHover: 'rgba(251,191,36,0.5)', dot: 'rgb(251,191,36)' },
-  blue:   { light: 'rgba(59,130,246,0.2)',  lightHover: 'rgba(59,130,246,0.4)',  dark: 'rgba(59,130,246,0.25)', darkHover: 'rgba(59,130,246,0.45)', dot: 'rgb(59,130,246)' },
-  green:  { light: 'rgba(34,197,94,0.2)',   lightHover: 'rgba(34,197,94,0.4)',   dark: 'rgba(34,197,94,0.25)',  darkHover: 'rgba(34,197,94,0.45)',  dot: 'rgb(34,197,94)' },
-  pink:   { light: 'rgba(244,114,182,0.2)', lightHover: 'rgba(244,114,182,0.4)', dark: 'rgba(244,114,182,0.25)',darkHover: 'rgba(244,114,182,0.45)',dot: 'rgb(244,114,182)' },
-  purple: { light: 'rgba(168,85,247,0.2)',  lightHover: 'rgba(168,85,247,0.4)',  dark: 'rgba(168,85,247,0.25)', darkHover: 'rgba(168,85,247,0.45)', dot: 'rgb(168,85,247)' },
-  orange: { light: 'rgba(251,146,60,0.2)',  lightHover: 'rgba(251,146,60,0.4)',  dark: 'rgba(251,146,60,0.25)', darkHover: 'rgba(251,146,60,0.45)', dot: 'rgb(251,146,60)' },
-};
 const DEFAULT_ANN_COLOR = 'yellow';
 
 // ── Utility functions (imperative DOM helpers) ──
@@ -1152,14 +1210,16 @@ function wireTableExpand(container) {
     wrap.className = 'table-wrap';
     table.parentNode.insertBefore(wrap, table);
     wrap.appendChild(table);
+    const expandSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4l4 0l0 4" /><path d="M14 10l6 -6" /><path d="M8 20l-4 0l0 -4" /><path d="M4 20l6 -6" /></svg>';
+    const shrinkSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l4 0l0 -4" /><path d="M3 3l6 6" /><path d="M5 15l4 0l0 4" /><path d="M3 21l6 -6" /><path d="M19 9l-4 0l0 -4" /><path d="M15 9l6 -6" /><path d="M19 15l-4 0l0 4" /><path d="M15 15l6 6" /></svg>';
     const btn = document.createElement('button');
     btn.className = 'table-expand-btn';
-    btn.textContent = '\\u2922';
+    btn.innerHTML = expandSvg;
     btn.title = 'Expand table';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const expanded = wrap.classList.toggle('expanded');
-      btn.textContent = expanded ? '\\u2921' : '\\u2922';
+      btn.innerHTML = expanded ? shrinkSvg : expandSvg;
       btn.title = expanded ? 'Collapse table' : 'Expand table';
       if (expanded) {
         const pad = 24;
@@ -1323,15 +1383,14 @@ function useTheme() {
   return { theme, toggle };
 }
 
-function useConflictDetection(pathRef, mtimeRef, onConflict) {
+function useConflictDetection(filePath, mtimeRef, onConflict) {
   const onConflictRef = useLatest(onConflict);
   useEffect(() => {
     const id = setInterval(async () => {
-      const path = pathRef.current;
       const mtime = mtimeRef.current;
-      if (IS_NEW || !mtime || !path) return;
+      if (!mtime || !filePath) return;
       try {
-        const res = await fetch('/api/mtime/' + path);
+        const res = await fetch('/api/mtime/' + filePath);
         if (!res.ok) return;
         const data = await res.json();
         if (Math.abs(data.mtime - mtime) > 0.01) {
@@ -1345,7 +1404,6 @@ function useConflictDetection(pathRef, mtimeRef, onConflict) {
 
 function useNotes(filePath) {
   const [notes, setNotes] = useState([]);
-  const savedPathRef = useRef(IS_NEW ? null : filePath);
   // notesRef mirrors latest committed mutation result (synchronously updated)
   // so that all writers see the latest list and don't race using stale closures.
   const notesRef = useRef([]);
@@ -1359,7 +1417,6 @@ function useNotes(filePath) {
   }, []);
 
   const load = useCallback(async () => {
-    if (IS_NEW) return;
     try {
       const res = await fetch('/api/annotations/' + filePath);
       const data = await res.json();
@@ -1368,20 +1425,19 @@ function useNotes(filePath) {
   }, [filePath, applyNotes]);
 
   const persist = useCallback((updated) => {
-    const path = savedPathRef.current;
-    if (!path) return Promise.resolve();
+    if (!filePath) return Promise.resolve();
     // Snapshot the payload and chain on the existing write queue so PUTs run
     // strictly in order — last enqueued is the last to land on disk.
     const payload = JSON.stringify({ annotations: updated });
     const next = writeChainRef.current.then(() =>
-      fetch('/api/annotations/' + path, {
+      fetch('/api/annotations/' + filePath, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: payload,
       }).catch(() => {})
     );
     writeChainRef.current = next;
     return next;
-  }, []);
+  }, [filePath]);
 
   const addNote = useCallback(async (text, comment) => {
     const ann = {
@@ -1413,13 +1469,13 @@ function useNotes(filePath) {
     await persist(updated);
   }, [persist, applyNotes]);
 
-  return { notes, notesRef, setNotes: applyNotes, load, persist, addNote, updateNote, resolveNote, deleteNote, savedPathRef };
+  return { notes, notesRef, setNotes: applyNotes, load, persist, addNote, updateNote, resolveNote, deleteNote };
 }
 
 // ── Components ──
 
 function ThemeToggle({ theme, onToggle }) {
-  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19'}</button>\`;
+  return html\`<button class="theme-toggle" onClick=\${onToggle}>\${theme === 'dark' ? html\`<\${IconSun} ...\${ICON} />\` : html\`<\${IconMoon} ...\${ICON} />\`}</button>\`;
 }
 
 function ProgressBar() {
@@ -1533,7 +1589,7 @@ function RenameButton({ markdown, isDirty, filePath }) {
   }, [canonicalName, currentName]);
 
   // Hide if: new file, no title, or already matching
-  if (IS_NEW || !canonicalName || alreadyCanonical) return null;
+  if (!canonicalName || alreadyCanonical) return null;
 
   const handleRename = async () => {
     if (isDirty || renaming) return;
@@ -1645,7 +1701,7 @@ function TocSidebar({ mode, cmEditorRef, tocVersion, markdown, isDirty }) {
       <\${RenameButton} markdown=\${markdown} isDirty=\${isDirty} filePath=\${FILE_PATH} />
       <div class="toc-header" onClick=\${() => setMinimized(!minimized)}>
         <span class="toc-title">Contents</span>
-        <button class="toc-minimize">\${minimized ? '+' : '\\u2013'}</button>
+        <button class="toc-minimize">\${minimized ? html\`<\${IconPlus} size=\${14} stroke=\${1.5} />\` : html\`<\${IconMinus} size=\${14} stroke=\${1.5} />\`}</button>
       </div>
       <div class="toc-links" ref=\${linksRef}></div>
     </nav>\`;
@@ -1936,7 +1992,7 @@ function NotesSidebar({ notes, onAdd, onUpdate, onResolve, onDelete, mode, onNot
     <aside class=\${'notes-sidebar' + (minimized ? ' minimized' : '') + (scrolled ? ' scrolled' : '')}>
       <div class="notes-header" onClick=\${() => setMinimized(!minimized)}>
         <span class="notes-title">Notes\${notes.length ? ' (' + count + ')' : ''}</span>
-        <button class="notes-minimize">\${minimized ? '+' : '\\u2013'}</button>
+        <button class="notes-minimize">\${minimized ? html\`<\${IconPlus} size=\${14} stroke=\${1.5} />\` : html\`<\${IconMinus} size=\${14} stroke=\${1.5} />\`}</button>
       </div>
       <div class="notes-body">
         \${!isViewOnly ? html\`<\${NoteInput} onAdd=\${onAdd} onUpdate=\${onUpdate} onSelectionActive=\${handleSelectionActive}
@@ -1955,15 +2011,6 @@ function NotesSidebar({ notes, onAdd, onUpdate, onResolve, onDelete, mode, onNot
           </div>\` : null}
       </div>
     </aside>\`;
-}
-
-function NewFileBar({ visible }) {
-  if (!visible) return null;
-  return html\`
-    <div class="new-file-bar">
-      <span>Filename:</span>
-      <input type="text" id="new-filename" placeholder="my-document.md" />
-    </div>\`;
 }
 
 // ── Chat ──
@@ -2118,7 +2165,7 @@ function ChatPanel({ getArticleText, notes }) {
 
 function DocApp() {
   const { theme, toggle: toggleTheme } = useTheme();
-  const [mode, setModeState] = useState(IS_NEW ? 'raw' : 'read');
+  const [mode, setModeState] = useState('read');
   const [markdown, setMarkdown] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
@@ -2127,7 +2174,6 @@ function DocApp() {
   const [tocVersion, setTocVersion] = useState(0);
 
   const fileMtimeRef = useRef(null);
-  const savedFilePathRef = useRef(IS_NEW ? null : FILE_PATH);
   const wasAutoSaveRef = useRef(false);
   const autoSaveTimerRef = useRef(null);
   const tocTimerRef = useRef(null);
@@ -2143,7 +2189,7 @@ function DocApp() {
     const t = markdown.trim();
     return t ? t.split(/\\s+/).length : 0;
   }, [markdown]);
-  const readTime = useMemo(() => Math.max(1, Math.ceil(wordCount / 238)), [wordCount]);
+  const readTime = useMemo(() => wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 238)) : 0, [wordCount]);
 
   // Get current content from active editor
   const getContent = useCallback(() => {
@@ -2170,31 +2216,7 @@ function DocApp() {
     }
     const content = getContent();
 
-    if (IS_NEW && !savedFilePathRef.current) {
-      const input = document.getElementById('new-filename');
-      let name = input.value.trim();
-      if (!name) { input.focus(); input.style.borderColor = '#dc2626'; return; }
-      if (!name.endsWith('.md')) name += '.md';
-      savedFilePathRef.current = name;
-      notesHook.savedPathRef.current = name;
-      const res = await fetch('/api/file/new', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: name, content}) });
-      if (res.ok) {
-        setIsDirty(false);
-        setMarkdown(content);
-        history.replaceState(null, '', '/doc/' + name);
-        // Initial persist for a brand-new file: at this point savedPathRef
-        // just became valid, so any prior annotation mutations were no-ops.
-        await notesHook.persist(notesRef.current);
-      } else {
-        const d = await res.json();
-        alert('Error: ' + (d.error || 'save failed'));
-        savedFilePathRef.current = null;
-        notesHook.savedPathRef.current = null;
-      }
-      return;
-    }
-
-    const path = savedFilePathRef.current || FILE_PATH;
+    const path = FILE_PATH;
     const putMtime = conflictState ? null : fileMtimeRef.current;
     const res = await fetch('/api/file/' + path, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -2259,14 +2281,13 @@ function DocApp() {
   }, []);
 
   // Conflict detection
-  useConflictDetection(savedFilePathRef, fileMtimeRef, async () => {
+  useConflictDetection(FILE_PATH, fileMtimeRef, async () => {
     if (isDirty) {
       setConflictState(true);
       wasAutoSaveRef.current = autoSave;
       if (autoSave) setAutoSave(false);
     } else {
-      const path = savedFilePathRef.current || FILE_PATH;
-      const fileRes = await fetch('/api/file/' + path);
+      const fileRes = await fetch('/api/file/' + FILE_PATH);
       if (fileRes.ok) {
         const fd = await fileRes.json();
         setMarkdown(fd.content);
@@ -2291,7 +2312,7 @@ function DocApp() {
   }, [mode]);
 
   // Note actions — bump renderVersion to re-apply highlights
-  const rerender = () => setRenderVersion(v => v + 1);
+  const rerender = useCallback(() => setRenderVersion(v => v + 1), []);
   const handleAddNote = useCallback(async (text, comment) => { const n = await addNote(text, comment); rerender(); return n; }, [addNote]);
   const handleResolve = useCallback(async (id) => { await resolveNote(id); rerender(); }, [resolveNote]);
   const handleDelete = useCallback(async (id) => { await deleteNote(id); rerender(); }, [deleteNote]);
@@ -2320,7 +2341,6 @@ function DocApp() {
 
   // Init: load file + annotations
   useEffect(() => {
-    if (IS_NEW) return;
     (async () => {
       const [mdRes] = await Promise.all([
         fetch('/api/file/' + FILE_PATH),
@@ -2330,6 +2350,7 @@ function DocApp() {
       const data = await mdRes.json();
       setMarkdown(data.content);
       fileMtimeRef.current = data.mtime || null;
+      if (!data.content) setModeState('raw');
       // Trigger TOC rebuild after content arrives
       setTocVersion(v => v + 1);
     })();
@@ -2351,7 +2372,6 @@ function DocApp() {
     <\${TocSidebar} mode=\${mode} cmEditorRef=\${cmEditorRef} tocVersion=\${tocVersion} markdown=\${markdown} isDirty=\${isDirty} />
     <div class="layout">
       <main class="main-col">
-        <\${NewFileBar} visible=\${IS_NEW} />
         \${mode === 'read' ? html\`<\${ReadView} markdown=\${markdown} notes=\${notes}
           onHighlightClick=\${handleHighlightClick} renderVersion=\${renderVersion} />\` : null}
         \${mode === 'raw' ? html\`<\${RawEditor} markdown=\${markdown} onDirty=\${markDirty}
@@ -2363,7 +2383,7 @@ function DocApp() {
     <\${NotesSidebar} notes=\${notes} onAdd=\${handleAddNote} onUpdate=\${handleUpdate}
       onResolve=\${handleResolve} onDelete=\${handleDelete} mode=\${mode}
       onNoteClick=\${handleNoteClick} />
-    <\${ChatPanel} getArticleText=\${getArticleText} notes=\${notes} />\`;
+    \${CHAT_ENABLED ? html\`<\${ChatPanel} getArticleText=\${getArticleText} notes=\${notes} />\` : null}\`;
 }
 
 render(html\`<\${DocApp} />\`, document.getElementById('app'));
@@ -2430,12 +2450,12 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
     const trailingSlash = rawRel.endsWith("/");
     const rel = trailingSlash ? rawRel.slice(0, -1) : rawRel;
     const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "not found" }, 404);
+    if (!fp) return htmlResponse("<h1>Not found</h1>", 404);
     let stat: Deno.FileInfo;
     try {
       stat = await Deno.stat(fp);
     } catch {
-      return jsonResponse({ error: "not found" }, 404);
+      return htmlResponse("<h1>Not found</h1>", 404);
     }
     if (stat.isDirectory) {
       // Canonicalize directory URLs to end with "/" so relative links work
@@ -2453,9 +2473,19 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
     return htmlResponse(docPage(title, rel));
   }
 
-  // GET /new
+  // GET /new — create new_document.md (with counter if needed) and redirect
   if (method === "GET" && path === "/new") {
-    return htmlResponse(docPage("New File", "__new__"));
+    let name = "new_document.md";
+    let fp = join(BASE_DIR, name);
+    let i = 2;
+    while (true) {
+      try { await Deno.stat(fp); } catch { break; }
+      name = `new_document_${i}.md`;
+      fp = join(BASE_DIR, name);
+      i++;
+    }
+    await Deno.writeTextFile(fp, "");
+    return new Response(null, { status: 302, headers: { Location: "/doc/" + name } });
   }
 
   // GET /static/*
@@ -2546,25 +2576,6 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
     const body = await req.json();
     await Deno.writeTextFile(fp, JSON.stringify(body, null, 2));
     return jsonResponse({ ok: true });
-  }
-
-  // POST /api/file/new
-  if (method === "POST" && path === "/api/file/new") {
-    const body = await req.json();
-    const rel = body.path || "";
-    if (!rel || !rel.endsWith(".md")) return jsonResponse({ error: "path must end in .md" }, 400);
-    const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
-    try {
-      await Deno.stat(fp);
-      return jsonResponse({ error: "file already exists" }, 409);
-    } catch {
-      // Good — file doesn't exist
-    }
-    const dir = dirname(fp);
-    await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(fp, body.content || "");
-    return jsonResponse({ ok: true, path: rel });
   }
 
   // POST /api/rename
@@ -2742,8 +2753,15 @@ try {
   Deno.exit(1);
 }
 
-const files: { rel: string; name: string; mtime: number; mins: number }[] = [];
-await collectFiles(BASE_DIR, "", files);
+async function countFiles(dir: string): Promise<number> {
+  let n = 0;
+  for await (const entry of Deno.readDir(dir)) {
+    if (entry.isDirectory) n += await countFiles(join(dir, entry.name));
+    else if (entry.isFile && entry.name.endsWith(".md")) n++;
+  }
+  return n;
+}
+const fileCount = await countFiles(BASE_DIR);
 
 function tryPort(port: number): boolean {
   try {
@@ -2759,7 +2777,7 @@ let port = PREFERRED_PORT;
 while (!tryPort(port) && port < PREFERRED_PORT + 100) port++;
 
 console.log(`mdmaster \u2192 http://localhost:${port}`);
-console.log(`  serving ${files.length} files from ${BASE_DIR}`);
+console.log(`  serving ${fileCount} files from ${BASE_DIR}`);
 console.log(`  chat: ${ANTHROPIC_API_KEY ? 'Anthropic' : OPENAI_API_KEY ? 'OpenAI' : 'disabled (no API key)'}`);
 
 Deno.serve({ port, hostname: "127.0.0.1" }, handler);
