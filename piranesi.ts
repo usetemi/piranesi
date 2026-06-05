@@ -17,9 +17,27 @@ import { createAnthropic } from "https://esm.sh/@ai-sdk/anthropic@1.2.12";
 const PREFERRED_PORT = parseInt(Deno.env.get("PORT") || "8888");
 const BASE_DIR = resolve(Deno.args[0] || "working_data/");
 
+// Load .env sitting next to this script (Deno doesn't auto-load it, and the
+// server is often launched from a different cwd). Only sets vars not already set.
+async function loadDotEnv() {
+  try {
+    const dir = import.meta.dirname || ".";
+    const text = await Deno.readTextFile(join(dir, ".env"));
+    for (const line of text.split("\n")) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (!m) continue;
+      const key = m[1];
+      const val = m[2].trim().replace(/^["']|["']$/g, "");
+      if (!Deno.env.get(key)) Deno.env.set(key, val);
+    }
+  } catch { /* no .env, fine */ }
+}
+await loadDotEnv();
+
 // LLM provider — prefer Anthropic, fall back to OpenAI
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const chatModel = ANTHROPIC_API_KEY
   ? createAnthropic({ apiKey: ANTHROPIC_API_KEY })("claude-sonnet-4-20250514")
   : OPENAI_API_KEY
@@ -79,6 +97,7 @@ const PROSE_CSS = `
 .prose p { margin-bottom: 0.85rem; hanging-punctuation: first; orphans: 3; widows: 3; }
 .prose a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; transition: text-decoration-color 0.15s; }
 .prose a:hover { text-decoration-color: transparent; }
+.prose a.broken-link { color: var(--red, #c33); text-decoration-color: var(--red, #c33); opacity: 0.85; }
 .prose strong { font-weight: 600; letter-spacing: -0.005em; }
 .prose em { font-style: italic; }
 .prose a.section-ref { color: inherit; text-decoration: none; cursor: pointer; }
@@ -183,8 +202,14 @@ const PROSE_CSS = `
 .prose th { background: var(--code-bg); font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
 .prose h1 + p, .prose h2 + p, .prose h3 + p, .prose h4 + p { margin-top: 0; }
 .prose li > p { margin-bottom: 0.3rem; }
-.prose img { max-width: 100%; height: auto; border-radius: 0; margin: 1rem 0; }
-.prose blockquote img { float: right; max-width: 160px; margin: 0 0 0.75rem 1.25rem; border-radius: 0; }
+.prose img { display: block; max-width: 100%; height: auto; border-radius: 0; margin: 1rem auto; }
+.prose blockquote img { float: right; display: block; max-width: 160px; margin: 0 0 0.75rem 1.25rem; border-radius: 0; }
+.prose .img-figure { margin: 1.5rem 0; text-align: center; }
+.prose .img-figure img { margin: 0 auto; }
+.prose .img-figure figcaption {
+  margin-top: 0.5rem; font-style: italic; font-size: 0.82rem;
+  line-height: 1.4; color: var(--fg); text-align: center;
+}
 .prose > p:first-child::first-letter {
   font-family: 'Lora', Georgia, serif; font-size: 3.2em; font-weight: 600;
   float: left; line-height: 0.8; margin: 0.1em 0.12em 0 0; color: var(--accent);
@@ -314,6 +339,10 @@ const LAYOUT_CSS = `
 .top-bar a:hover { color: var(--fg); }
 .top-bar .word-count { color: var(--fg3); font-size: 0.75rem; margin-left: 0.75rem; }
 .top-left { display: flex; align-items: center; }
+.breadcrumbs { display: inline-flex; align-items: center; gap: 0.15rem; }
+.breadcrumbs a { color: var(--fg3); font-size: 0.85rem; text-decoration: none; }
+.breadcrumbs a:hover { color: var(--fg); }
+.crumb-sep { color: var(--fg3); font-size: 0.75rem; margin: 0 0.1rem; }
 .controls { display: flex; gap: 0.5rem; align-items: center; }
 /* Toggle pills */
 .pill { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -351,6 +380,16 @@ const LAYOUT_CSS = `
 `;
 
 const EDITOR_CSS = `
+/* Email export panel (right pane, Raw mode only) */
+.email-panel-title { font-weight: 600; color: var(--fg3); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.6rem; margin-bottom: 0.5rem; }
+.email-btn {
+  display: block; width: 100%; text-align: center;
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.45rem 0.7rem; cursor: pointer; color: var(--fg2); font-size: 0.78rem;
+  font-family: inherit; transition: border-color 0.2s, color 0.2s;
+}
+.email-btn:hover { border-color: var(--fg2); color: var(--fg); }
+.email-hint { font-size: 0.66rem; color: var(--fg3); line-height: 1.45; margin-top: 0.5rem; }
 /* CodeMirror overrides */
 #cm-wrap { margin-top: 1rem; }
 #cm-wrap .cm-editor { background: var(--bg); min-height: calc(100vh - 8rem); }
@@ -512,16 +551,18 @@ const INDEX_CSS = `
 .file-table th .sort-arrow { margin-left: 0.3rem; font-size: 0.65rem; }
 .file-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
 .file-table tr:hover td { background: var(--card-hover); }
-.file-table tr td:first-child { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-table tr td:first-child { font-weight: 500; }
 .file-table th:nth-child(2), .file-table th:nth-child(3) { width: 5.5rem; }
-.file-table a { color: var(--fg); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-table a { color: var(--fg); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-table a:hover { color: var(--accent); }
 .file-meta-cell { color: var(--fg2); font-size: 0.82rem; white-space: nowrap; }
 .tree-dir-row { cursor: pointer; }
 .tree-dir-row td:first-child { font-weight: 500; }
-.tree-dir-label { display: inline-flex; align-items: center; gap: 0.25rem; }
+.tree-dir-label { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
+.tree-dir-label > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-icon { display: inline-flex; align-items: center; color: var(--fg3); flex-shrink: 0; }
-.tree-file-cell a { display: inline-flex; align-items: center; gap: 0.4rem; }
+.tree-file-cell { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.tree-file-cell a { display: block; flex: 1; }
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
 .sort-arrow { display: inline-flex; align-items: center; vertical-align: middle; }
 `;
@@ -642,6 +683,19 @@ const RESPONSIVE_CSS = `
 `;
 
 const PRINT_CSS = `
+@page {
+  /* Slim top/bottom, generous left/right for reading measure */
+  margin: 0.4in 1.5in;
+  /* Page number lives in the slim bottom margin
+     (uncheck "Headers and footers" in the print dialog to drop URL/title/date) */
+  @bottom-center {
+    content: counter(page);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 9pt;
+    color: #888;
+  }
+}
+
 @media print {
   /* Hide all chrome */
   .top-bar, .top-bar-spacer, .toc-sidebar, .notes-sidebar,
@@ -651,8 +705,9 @@ const PRINT_CSS = `
   /* Reset to plain document flow */
   body { background: white; color: black; font-size: 12pt; }
   .layout { position: static; }
+  /* Generous reading measure, centered within the page margins */
   .main-col {
-    max-width: none; width: 100%; margin: 0; padding: 0;
+    max-width: 33em; width: 100%; margin: 0 auto; padding: 0;
     overflow: visible;
   }
 
@@ -660,13 +715,12 @@ const PRINT_CSS = `
   .prose h1, .prose h2, .prose h3, .prose h4 { page-break-after: avoid; }
   .prose p, .prose li, .prose blockquote { orphans: 3; widows: 3; }
   .prose pre, .prose blockquote, .prose table, .prose img { page-break-inside: avoid; }
+  .prose .img-figure { page-break-inside: avoid; }
   .prose img { max-width: 100%; }
+  .prose .img-figure figcaption { color: black; }
 
-  /* Make links readable on paper */
-  .prose a { color: black; text-decoration: underline; }
-  .prose a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #555; word-break: break-all; }
-  .prose a.section-ref::after { content: none; }
-  .prose a.footnote-ref::after, .prose a.footnote-back::after { content: none; }
+  /* Keep links as normal blue underlined links (force light-theme link color) */
+  .prose a { color: #004c99; text-decoration: underline; }
 
   /* Strip annotation highlights */
   .annotated { background: none !important; outline: none !important; }
@@ -803,7 +857,7 @@ function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, 
   return html\`
     <tr class="tree-dir-row" key=\${'dir:' + dirPath} onClick=\${(e) => onToggle(dirPath, e.altKey)}>
       <td style=\${'padding-left: ' + (0.75 + depth * 1.25) + 'rem'}>
-        <span class="tree-dir-label"><span class="tree-icon">\${isCollapsed ? html\`<\${IconFolder} ...\${ICON} />\` : html\`<\${IconFolderOpen} ...\${ICON} />\`}</span>\${name}</span>
+        <span class="tree-dir-label"><span class="tree-icon">\${isCollapsed ? html\`<\${IconFolder} ...\${ICON} />\` : html\`<\${IconFolderOpen} ...\${ICON} />\`}</span><span class="tree-dir-name" title=\${name}>\${name}</span></span>
       </td>
       <td class="file-meta-cell">\${dirDate}</td>
       <td class="file-meta-cell"></td>
@@ -820,7 +874,7 @@ function TreeDir({ name, node, depth, collapsed, onToggle, pathPrefix, sortCol, 
         <tr key=\${f.rel}>
           <td style=\${'padding-left: ' + (0.75 + (depth + 1) * 1.25) + 'rem'} class="tree-file-cell">
             <span class="tree-icon"><\${IconFile} ...\${ICON} /></span>
-            <a href=\${'/doc/' + REL_PREFIX + f.rel}>\${f.name}</a>
+            <a href=\${'/doc/' + REL_PREFIX + f.rel} title=\${f.name}>\${f.name}</a>
           </td>
           <td class="file-meta-cell">\${ds}</td>
           <td class="file-meta-cell">\${f.mins} min</td>
@@ -881,7 +935,7 @@ function FileTable({ files, sortCol, sortDir, onSort }) {
           const ds = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
           return html\`
             <tr key=\${f.rel}>
-              <td class="tree-file-cell"><span class="tree-icon"><\${IconFile} ...\${ICON} /></span><a href=\${'/doc/' + REL_PREFIX + f.rel}>\${f.name}</a></td>
+              <td class="tree-file-cell"><span class="tree-icon"><\${IconFile} ...\${ICON} /></span><a href=\${'/doc/' + REL_PREFIX + f.rel} title=\${f.name}>\${f.name}</a></td>
               <td class="file-meta-cell">\${ds}</td>
               <td class="file-meta-cell">\${f.mins} min</td>
             </tr>\`;
@@ -951,7 +1005,7 @@ import { marked } from 'https://esm.sh/marked@15';
 import markedFootnote from 'https://esm.sh/marked-footnote@1';
 import TurndownService from 'https://esm.sh/turndown@7';
 import { gfm as turndownGfm } from 'https://esm.sh/@joplin/turndown-plugin-gfm@1';
-import { IconSun, IconMoon, IconPlus, IconMinus, IconArrowsMaximize, IconArrowsMinimize } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconPlus,IconMinus,IconArrowsMaximize,IconArrowsMinimize';
+import { IconSun, IconMoon, IconPlus, IconMinus, IconArrowsMaximize, IconArrowsMinimize, IconHome } from 'https://esm.sh/@tabler/icons-preact@3?exports=IconSun,IconMoon,IconPlus,IconMinus,IconArrowsMaximize,IconArrowsMinimize,IconHome';
 import { basicSetup, EditorView } from 'codemirror';
 import { EditorState, Compartment } from '@codemirror/state';
 import { markdown as mdLang } from '@codemirror/lang-markdown';
@@ -1226,6 +1280,45 @@ function rewriteImageSrcs(container) {
   });
 }
 
+// Read-mode only: turn alt text into a centered <figcaption>. NOT used in the
+// Formatted editor — keeping bare <img> there makes the contenteditable→markdown
+// round-trip simple and lossless (a <figure> wrapper otherwise corrupts it).
+function wrapImageCaptions(container) {
+  container.querySelectorAll('img').forEach(img => {
+    const alt = (img.getAttribute('alt') || '').trim();
+    const p = img.parentElement;
+    const isStandalone = p && p.tagName === 'P' &&
+      p.childElementCount === 1 && p.textContent.trim() === '';
+    const inBlockquote = !!img.closest('blockquote');
+    if (alt && isStandalone && !inBlockquote && !img.closest('figure')) {
+      const figure = document.createElement('figure');
+      figure.className = 'img-figure';
+      const caption = document.createElement('figcaption');
+      caption.textContent = alt;
+      p.replaceWith(figure);
+      figure.appendChild(img);
+      figure.appendChild(caption);
+    }
+  });
+}
+
+function checkBrokenLinks(container) {
+  const links = container.querySelectorAll('a[href]');
+  for (const a of links) {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('mailto:')) continue;
+    // Check both internal and external links
+    const url = href.startsWith('http') ? href : new URL(href, location.origin).href;
+    fetch(url, { method: 'HEAD', mode: href.startsWith('http') ? 'no-cors' : 'same-origin' })
+      .then(res => {
+        // no-cors returns opaque response (status 0) — can't determine broken, skip
+        if (res.type === 'opaque') return;
+        if (!res.ok) a.classList.add('broken-link');
+      })
+      .catch(() => { a.classList.add('broken-link'); });
+  }
+}
+
 // ── HTML comment stashing for WYSIWYG ──
 let stashedComments = [];
 function stashComments(md) {
@@ -1283,6 +1376,20 @@ function htmlToMarkdown(el) {
     tdInstance.addRule('evalResult', {
       filter: node => node.nodeName === 'SPAN' && node.classList.contains('eval-result'),
       replacement: (content, node) => '\x60= ' + (node.getAttribute('title') || content) + '\x60'
+    });
+    tdInstance.addRule('imgFigure', {
+      // Caption figures are a display-only wrapper around an <img> whose alt
+      // text IS the caption. Serialize from the inner <img> and drop the
+      // <figcaption> so the caption text isn't duplicated into the markdown.
+      filter: node => node.nodeName === 'FIGURE' && node.classList.contains('img-figure'),
+      replacement: (content, node) => {
+        const img = node.querySelector('img');
+        if (!img) return content;
+        const src = img.getAttribute('src') || '';
+        const fileDir = '/static/' + FILE_PATH.substring(0, FILE_PATH.lastIndexOf('/') + 1);
+        const relSrc = src.startsWith(fileDir) ? src.substring(fileDir.length) : src;
+        return '\\n\\n![' + (img.getAttribute('alt') || '') + '](' + relSrc + ')\\n\\n';
+      }
     });
     tdInstance.addRule('relativeImages', {
       filter: node => node.nodeName === 'IMG' && node.getAttribute('src') && node.getAttribute('src').startsWith('/static/'),
@@ -1514,12 +1621,28 @@ function SaveControls({ mode, isDirty, autoSave, onSetAutoSave, onSave, conflict
     </div>\`;
 }
 
+function Breadcrumbs() {
+  const parts = FILE_PATH.split('/');
+  const dirs = parts.slice(0, -1);
+  let acc = '';
+  const folderCrumbs = dirs.map(seg => {
+    acc = acc ? acc + '/' + seg : seg;
+    return { name: seg, href: '/doc/' + acc + '/' };
+  });
+  return html\`<span class="breadcrumbs">
+    <a href="/"><\${IconHome} size=\${14} stroke=\${1.5} /></a>
+    \${folderCrumbs.map(c => html\`
+      <span class="crumb-sep">/</span><a href=\${c.href}>\${c.name}</a>
+    \`)}
+  </span>\`;
+}
+
 function TopBar({ mode, onSetMode, isDirty, autoSave, onSetAutoSave, onSave, conflictState, wordCount, readTime, theme, onToggleTheme }) {
   const isFixed = mode === 'raw' || mode === 'formatted';
   return html\`
     <div class=\${'top-bar' + (isFixed ? ' fixed' : '')}>
       <div class="top-left">
-        <a href="/">\u2190 all files</a>
+        <\${Breadcrumbs} />
         <span class="word-count">\${wordCount > 0 ? wordCount.toLocaleString() + ' words' : ''}</span>
       </div>
       <div class="controls">
@@ -1556,6 +1679,220 @@ function extractTitle(md) {
     if (t) return t.slice(0, 60);
   }
   return '';
+}
+
+// ── Email export ─────────────────────────────────────────────────────────────
+// Gmail strips <style>/<head>/class/id on paste — only inline style="" survives —
+// and rejects data: image src. So we render the markdown, INLINE a Gmail-safe
+// style subset onto every element, give images real (loaded) <img> tags pointing
+// at the same-origin /static URL, and copy the RENDERED DOM (not a string) so the
+// browser hands Gmail actual image bytes, which it re-uploads as inline (CID)
+// attachments on paste. Captions are visible <div>s (alt-only would stay hidden
+// because Gmail auto-displays images). Light-theme palette (email bg is white).
+// Spacing copied as closely as possible from a polished Substack newsletter email
+// (see SAMPLE.email). Body: rgb(54,55,55), 16px/26px, 20px paragraph gap. Column
+// 550px centered, 32px top pad. No background colors.
+const EMAIL_FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const EMAIL_STYLES = {
+  // h1 verbatim from sample: 32px/36px, bold, no top margin.
+  H1: 'font-size:32px;line-height:36px;font-weight:bold;margin:0 0 16px;color:rgb(54,55,55);',
+  // h2/h3 derived on the same baseline (sample body had no in-line h2; keep legible & bold).
+  H2: 'font-size:24px;line-height:30px;font-weight:bold;margin:32px 0 12px;color:rgb(54,55,55);',
+  H3: 'font-size:19px;line-height:26px;font-weight:bold;margin:28px 0 10px;color:rgb(54,55,55);',
+  H4: 'font-size:13px;line-height:20px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;margin:24px 0 8px;color:rgb(119,119,119);',
+  // p verbatim from sample.
+  P:  'font-size:16px;line-height:26px;margin:0 0 20px 0;color:rgb(54,55,55);',
+  LI: 'font-size:16px;line-height:26px;margin:0 0 8px 0;color:rgb(54,55,55);',
+  UL: 'margin:0 0 20px 0;padding-left:24px;',
+  OL: 'margin:0 0 20px 0;padding-left:24px;',
+  BLOCKQUOTE: 'margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid #d9d9d9;color:rgb(90,90,90);font-style:italic;',
+  A:  'color:#0071ce;text-decoration:underline;',
+  // hr: sample uses margin:32px 0 (invisible); we keep a faint visible rule, same rhythm.
+  HR: 'border:none;border-top:1px solid #e2e2e2;margin:32px 0;padding:0;',
+  STRONG: 'font-weight:bold;',
+  EM: 'font-style:italic;',
+  CODE: "font-family:Menlo,Consolas,monospace;font-size:14px;background:#f4f4f4;border-radius:3px;padding:1px 5px;",
+  PRE: "font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;background:#f7f7f7;border:1px solid #e2e2e2;border-radius:4px;padding:14px;overflow:auto;margin:0 0 20px 0;",
+  TABLE: 'border-collapse:collapse;width:100%;margin:0 0 20px 0;font-size:15px;',
+  TH: 'border:1px solid #e2e2e2;padding:7px 11px;text-align:left;background:#f7f7f7;font-weight:600;',
+  TD: 'border:1px solid #e2e2e2;padding:7px 11px;text-align:left;vertical-align:top;',
+};
+
+// Resolve a markdown image src to a same-origin /static URL the browser can load.
+function resolveStaticUrl(src) {
+  if (!src) return null;
+  // Absolute localhost → strip origin so it's same-origin.
+  src = src.replace(/^https?:\\/\\/localhost(:\\d+)?/, '');
+  if (src.startsWith('/static/')) return src;
+  if (src.startsWith('http')) return src;            // external — load as-is
+  const fileDir = FILE_PATH.substring(0, FILE_PATH.lastIndexOf('/') + 1);
+  return '/static/' + fileDir + src;
+}
+
+// Build the inline-styled email DOM (real loaded <img>s + visible captions).
+// opts.cidImages: when provided (an array), images get src="cid:imgN" and each
+// image's {cid, url} is pushed to it (for server-side CID attachment on send).
+function buildEmailDom(markdown, opts) {
+  opts = opts || {};
+  const wrap = document.createElement('div');
+  wrap.innerHTML = marked.parse(markdown || '');
+
+  // Each image → centered figure with a real <img> (same-origin) + italic caption.
+  Array.from(wrap.querySelectorAll('img')).forEach((img, i) => {
+    const alt = (img.getAttribute('alt') || '').trim();
+    // Sample: image block margin ≈ 1em 0 1.6em (16px top / 26px bottom), centered.
+    const fig = document.createElement('div');
+    fig.style.cssText = 'margin:16px auto 26px;text-align:center;';
+
+    const el = document.createElement('img');
+    const url = resolveStaticUrl(img.getAttribute('src'));
+    if (opts.cidImages) {
+      const cid = 'img' + i;
+      el.setAttribute('src', 'cid:' + cid);
+      opts.cidImages.push({ cid, url });
+    } else {
+      el.setAttribute('src', url);
+    }
+    if (alt) el.setAttribute('alt', alt);
+    el.setAttribute('style', 'max-width:100%;height:auto;display:block;margin:0 auto;border:none;');
+    fig.appendChild(el);
+
+    if (alt) {
+      // Caption: 14px/20px italic, inset 15% each side. Black text (no gray).
+      const cap = document.createElement('div');
+      cap.style.cssText = 'margin-top:8px;font-style:italic;color:rgb(54,55,55);font-size:14px;line-height:20px;font-weight:400;padding-left:15%;padding-right:15%;';
+      cap.textContent = alt;
+      fig.appendChild(cap);
+    }
+
+    const target = img.closest('figure') || img.parentElement;
+    if (target && (target.tagName === 'FIGURE' || (target.tagName === 'P' && target.childElementCount === 1 && !target.textContent.trim()))) {
+      target.replaceWith(fig);
+    } else {
+      img.replaceWith(fig);
+    }
+  });
+
+  // Strip app-only chrome: buttons, annotation spans.
+  wrap.querySelectorAll('button, .table-expand-btn').forEach(el => el.remove());
+  wrap.querySelectorAll('span.annotated').forEach(s => { s.replaceWith(document.createTextNode(s.textContent)); });
+
+  // Inline styles onto every element; strip class/id (Gmail discards them anyway).
+  // Translate align="center" → inline text-align (the attr alone is unreliable
+  // through markdown parsing AND in received Gmail). Also force-center lone
+  // dingbat/ornament paragraphs (e.g. ❧) as a belt-and-suspenders fallback.
+  const DINGBAT_RE = /^[\\u2042\\u2766\\u2767\\u2722-\\u2727\\u273B-\\u2740\\u2756\\u204A\\u00B7\\u2022\\u2014\\u2015\\u2026*~\\-\\s]+$/;
+  wrap.querySelectorAll('*').forEach(el => {
+    const base = EMAIL_STYLES[el.tagName] || '';
+    let extra = el.getAttribute('style') || '';
+    const align = el.getAttribute('align');
+    if (align && !/text-align/.test(base + extra)) extra += 'text-align:' + align + ';';
+    // Lone ornament paragraph → center regardless of how it was authored.
+    if (el.tagName === 'P' && el.childElementCount === 0) {
+      const t = (el.textContent || '').trim();
+      if (t && t.length <= 8 && DINGBAT_RE.test(t) && !/text-align/.test(base + extra)) {
+        extra += 'text-align:center;';
+      }
+    }
+    if (base || extra) el.setAttribute('style', base + extra);
+    el.removeAttribute('class');
+    el.removeAttribute('id');
+    el.removeAttribute('align');
+  });
+
+  // Centered reading column matching the sample: 550px, 32px top padding, no bg.
+  wrap.setAttribute('style',
+    'max-width:550px;margin:0 auto;padding:32px 0 0 0;' +
+    'font-family:' + EMAIL_FONT + ';color:rgb(54,55,55);' +
+    'font-size:16px;line-height:26px;');
+  return wrap;
+}
+
+// Fetch a same-origin image and return base64 + content type (for CID attachment).
+async function fetchImageBase64(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('image fetch failed: ' + url);
+  const blob = await res.blob();
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+  return { base64: btoa(bin), contentType: blob.type || 'application/octet-stream' };
+}
+
+// Build the full sendable HTML email (table-centered 600px column for fidelity in
+// received Gmail) plus the CID image attachments. Returns { html, attachments }.
+async function buildEmailForSend(markdown) {
+  const cidImages = [];
+  const dom = buildEmailDom(markdown, { cidImages });
+  // Inner column: the 550px content. Wrap in a centered table for bulletproof centering.
+  dom.setAttribute('style',
+    'font-family:' + EMAIL_FONT + ';color:rgb(54,55,55);font-size:16px;line-height:26px;');
+  const inner = dom.outerHTML;
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+    '<body style="margin:0;padding:0;background:#ffffff;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">' +
+    '<tr><td align="center" style="padding:24px 16px;">' +
+    '<table role="presentation" width="550" cellpadding="0" cellspacing="0" border="0" style="width:550px;max-width:550px;">' +
+    '<tr><td align="left">' + inner + '</td></tr></table>' +
+    '</td></tr></table></body></html>';
+
+  // Gather attachments.
+  const attachments = [];
+  for (const im of cidImages) {
+    const { base64, contentType } = await fetchImageBase64(im.url);
+    const filename = (im.url.split('/').pop() || (im.cid + '.png')).split('?')[0];
+    attachments.push({ filename, content_id: im.cid, content: base64, content_type: contentType });
+  }
+  return { html, attachments };
+}
+
+async function sendEmailViaResend(markdown, to, subject) {
+  const { html, attachments } = await buildEmailForSend(markdown);
+  const res = await fetch('/api/send-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, subject, html, attachments }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('send failed (' + res.status + ')'));
+  return data;
+}
+
+// Right pane shown in Raw mode only: send the document as a real HTML email.
+function EmailPanel({ markdown }) {
+  const [sendState, setSendState] = useState('idle'); // idle | sending | sent | error
+  const [sendMsg, setSendMsg] = useState('');
+  const onSend = useCallback(async () => {
+    setSendState('sending'); setSendMsg('');
+    try {
+      const subject = extractTitle(markdown) || 'Document';
+      await sendEmailViaResend(markdown, 'josh@usetemi.com', subject);
+      setSendState('sent');
+      setTimeout(() => setSendState('idle'), 4000);
+    } catch (e) {
+      setSendState('error'); setSendMsg(e.message || 'send failed');
+      setTimeout(() => setSendState('idle'), 6000);
+    }
+  }, [markdown]);
+  const sendLabel = sendState === 'sending' ? 'Sending…'
+    : sendState === 'sent' ? 'Sent ✓'
+    : sendState === 'error' ? 'Send failed'
+    : 'Send test → josh@usetemi.com';
+
+  return html\`
+    <aside class="notes-sidebar">
+      <div class="notes-body">
+        <div class="email-panel-title">Export</div>
+        <button class="email-btn" onClick=\${onSend} disabled=\${sendState === 'sending'}
+          title="Send this document as a real HTML email via Resend (test)">
+          \${sendLabel}
+        </button>
+        \${sendState === 'error' ? html\`<div class="email-hint" style="color:var(--red,#c33);">\${sendMsg}</div>\` : null}
+        <div class="email-hint">Delivers a real HTML email via Resend.</div>
+      </div>
+    </aside>\`;
 }
 
 function RenameButton({ markdown, isDirty, filePath }) {
@@ -1707,9 +2044,11 @@ function ReadView({ markdown, notes, onHighlightClick, renderVersion }) {
     if (!ref.current) return;
     ref.current.innerHTML = marked.parse(markdown);
     rewriteImageSrcs(ref.current);
+    wrapImageCaptions(ref.current);
     wireFootnotes(ref.current);
     wireInlineSectionLinks(ref.current);
     wireTableExpand(ref.current);
+    checkBrokenLinks(ref.current);
     applyAnnotations(ref.current, notes, onHighlightClick);
   }, [markdown, notes, renderVersion]);
   return html\`<article class="prose" id="content" ref=\${ref}></article>\`;
@@ -1974,8 +2313,36 @@ function NoteInput({ onAdd, onUpdate, onSelectionActive, editingNote, onClearEdi
         setComment('');
       }, 50);
     };
+    // Touch devices fire no mouseup for a text selection, so surface the settled
+    // selection via selectionchange (debounced). Create-only: never clears, so an
+    // incidental collapse can't wipe an in-progress comment; the guard skips
+    // re-firing for the selection already pending.
+    let selTimer = null;
+    const onSelectionChange = () => {
+      clearTimeout(selTimer);
+      selTimer = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        const text = sel.toString();
+        if (!text.trim() || selTextRef.current === text) return;
+        const proseEl = getProseEl();
+        if (!proseEl || !proseEl.contains(sel.anchorNode)) return;
+        if (editingRef.current) onClearEditingRef.current();
+        removePendingHighlights();
+        applyOneAnnotation(proseEl, { id: '_pending', text: text.replace(/\\s+/g, ' ').trim() });
+        setSelText(text);
+        setComment('');
+        setSaveStatus('');
+        if (onSelectionActiveRef.current) onSelectionActiveRef.current();
+      }, 350);
+    };
     document.addEventListener('mouseup', onMouseUp);
-    return () => document.removeEventListener('mouseup', onMouseUp);
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => {
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('selectionchange', onSelectionChange);
+      clearTimeout(selTimer);
+    };
   }, []);
 
   const flashStatus = useCallback((msg) => {
@@ -2495,6 +2862,7 @@ function DocApp() {
     <\${NotesSidebar} notes=\${notes} onAdd=\${handleAddNote} onUpdate=\${handleUpdate}
       onResolve=\${handleResolve} onDelete=\${handleDelete} mode=\${mode}
       onNoteClick=\${handleNoteClick} />
+    \${mode === 'raw' ? html\`<\${EmailPanel} markdown=\${markdown} />\` : null}
     \${CHAT_ENABLED ? html\`<\${ChatPanel} getArticleText=\${getArticleText} notes=\${notes} />\` : null}\`;
 }
 
@@ -2528,6 +2896,29 @@ function safePath(rel: string): string | null {
   return fp;
 }
 
+// Thrown by route helpers; converted to a JSON error response at the top of handler().
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+// Resolve a route-relative path within BASE_DIR, or throw 403.
+function mustResolve(rel: string): string {
+  const fp = safePath(rel);
+  if (!fp) throw new HttpError(403, "path not allowed");
+  return fp;
+}
+
+// Stat a file, or throw 404 if it doesn't exist / isn't readable.
+async function statOr404(fp: string): Promise<Deno.FileInfo> {
+  try {
+    return await Deno.stat(fp);
+  } catch {
+    throw new HttpError(404, "not found");
+  }
+}
+
 function getMtime(stat: Deno.FileInfo): number | null {
   return stat.mtime ? stat.mtime.getTime() / 1000 : null;
 }
@@ -2539,10 +2930,24 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
   const path = decodeURIComponent(url.pathname);
   const method = req.method;
 
+  try {
+    return await route(req, method, path, info);
+  } catch (e) {
+    if (e instanceof HttpError) return jsonResponse({ error: e.message }, e.status);
+    throw e;
+  }
+}
+
+async function route(
+  req: Request,
+  method: string,
+  path: string,
+  info: Deno.ServeHandlerInfo,
+): Promise<Response> {
   // Log page visits (HTML pages, not API/asset requests)
   if (method === "GET" && (path === "/" || path.startsWith("/doc/"))) {
     const ua = req.headers.get("user-agent") || "unknown";
-    const ip = info.remoteAddr.hostname;
+    const ip = info.remoteAddr.transport === "tcp" ? info.remoteAddr.hostname : "?";
     const now = new Date().toISOString();
     console.log(`[${now}] ${ip} GET ${path} — ${ua}`);
   }
@@ -2569,6 +2974,7 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
     } catch {
       return htmlResponse("<h1>Not found</h1>", 404);
     }
+    // (kept as html-404 rather than HttpError JSON — this is a page route)
     if (stat.isDirectory) {
       // Canonicalize directory URLs to end with "/" so relative links work
       if (!trailingSlash) {
@@ -2603,70 +3009,46 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
 
   // GET /static/*
   if (method === "GET" && path.startsWith("/static/")) {
-    const rel = path.slice(8);
-    const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
+    const fp = mustResolve(path.slice(8));
     try {
       const data = await Deno.readFile(fp);
-      const ext = extname(fp);
-      const mime = MIME[ext.toLowerCase()] || "application/octet-stream";
+      const mime = MIME[extname(fp).toLowerCase()] || "application/octet-stream";
       return new Response(data, { headers: { "Content-Type": mime } });
     } catch {
-      return jsonResponse({ error: "not found" }, 404);
+      throw new HttpError(404, "not found");
     }
   }
 
   // GET /api/file/:path
   if (method === "GET" && path.startsWith("/api/file/")) {
-    const rel = path.slice(10);
-    const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "not found" }, 404);
-    try {
-      const content = await Deno.readTextFile(fp);
-      const stat = await Deno.stat(fp);
-      return jsonResponse({ content, mtime: getMtime(stat) });
-    } catch {
-      return jsonResponse({ error: "not found" }, 404);
-    }
+    const fp = mustResolve(path.slice(10));
+    const stat = await statOr404(fp);
+    return jsonResponse({ content: await Deno.readTextFile(fp), mtime: getMtime(stat) });
   }
 
   // GET /api/mtime/:path
   if (method === "GET" && path.startsWith("/api/mtime/")) {
-    const rel = path.slice(11);
-    const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "not found" }, 404);
-    try {
-      const stat = await Deno.stat(fp);
-      return jsonResponse({ mtime: getMtime(stat) });
-    } catch {
-      return jsonResponse({ error: "not found" }, 404);
-    }
+    const fp = mustResolve(path.slice(11));
+    const stat = await statOr404(fp);
+    return jsonResponse({ mtime: getMtime(stat) });
   }
 
   // GET /api/annotations/:path
   if (method === "GET" && path.startsWith("/api/annotations/")) {
-    const rel = path.slice(17);
-    const fp = safePath(rel + ".annotations.json");
-    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
+    const fp = mustResolve(path.slice(17) + ".annotations.json");
     try {
-      const data = await Deno.readTextFile(fp);
-      return jsonResponse(JSON.parse(data));
+      return jsonResponse(JSON.parse(await Deno.readTextFile(fp)));
     } catch {
+      // No annotations file yet (or unreadable) — return an empty set, not an error.
       return jsonResponse({ annotations: [] });
     }
   }
 
   // PUT /api/file/:path
   if (method === "PUT" && path.startsWith("/api/file/")) {
-    const rel = path.slice(10);
-    const fp = safePath(rel);
-    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
-    if (!fp.endsWith(".md")) return jsonResponse({ error: "only .md files" }, 400);
-    try {
-      await Deno.stat(fp);
-    } catch {
-      return jsonResponse({ error: "not found" }, 404);
-    }
+    const fp = mustResolve(path.slice(10));
+    if (!fp.endsWith(".md")) throw new HttpError(400, "only .md files");
+    await statOr404(fp);
     const body = await req.json();
     const expectedMtime = body.mtime;
     if (expectedMtime != null) {
@@ -2683,9 +3065,7 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
 
   // PUT /api/annotations/:path
   if (method === "PUT" && path.startsWith("/api/annotations/")) {
-    const rel = path.slice(17);
-    const fp = safePath(rel + ".annotations.json");
-    if (!fp) return jsonResponse({ error: "path not allowed" }, 403);
+    const fp = mustResolve(path.slice(17) + ".annotations.json");
     const body = await req.json();
     await Deno.writeTextFile(fp, JSON.stringify(body, null, 2));
     return jsonResponse({ ok: true });
@@ -2699,22 +3079,18 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
     if (!fromRel || !toName || !toName.endsWith(".md")) {
       return jsonResponse({ error: "invalid parameters" }, 400);
     }
-    const fromFp = safePath(fromRel);
-    if (!fromFp) return jsonResponse({ error: "path not allowed" }, 403);
+    const fromFp = mustResolve(fromRel);
     // Preserve directory structure, only change the filename
     const fromDir = dirname(fromRel);
     let newRel = fromDir === "." ? toName : fromDir + "/" + toName;
-    let newFp = safePath(newRel);
-    if (!newFp) return jsonResponse({ error: "path not allowed" }, 403);
+    let newFp = mustResolve(newRel);
     // If target already exists, append a short random suffix
     try {
       await Deno.stat(newFp);
       const suffix = '_' + Math.random().toString(36).slice(2, 6);
-      const base = toName.replace(/\.md$/, '');
-      const suffixed = base + suffix + '.md';
+      const suffixed = toName.replace(/\.md$/, '') + suffix + '.md';
       newRel = fromDir === "." ? suffixed : fromDir + "/" + suffixed;
-      newFp = safePath(newRel);
-      if (!newFp) return jsonResponse({ error: "path not allowed" }, 403);
+      newFp = mustResolve(newRel);
     } catch {
       // Good — target doesn't exist
     }
@@ -2772,6 +3148,7 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
             }
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           } catch (e) {
+            console.error("chat stream error:", e);
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'stream error' })}\n\n`));
           }
           controller.close();
@@ -2786,7 +3163,41 @@ async function handler(req: Request, info: Deno.ServeHandlerInfo): Promise<Respo
         },
       });
     } catch (e) {
+      console.error("chat request error:", e);
       return jsonResponse({ error: 'Failed to reach LLM API' }, 502);
+    }
+  }
+
+  // POST /api/send-email — send a rendered HTML email via Resend.
+  if (method === "POST" && path === "/api/send-email") {
+    if (!RESEND_API_KEY) return jsonResponse({ error: "RESEND_API_KEY not set" }, 500);
+    try {
+      const body = await req.json();
+      const { to, subject, html, attachments } = body;
+      if (!to || !html) return jsonResponse({ error: "missing to/html" }, 400);
+      const payload: Record<string, unknown> = {
+        from: "Piranesi <onboarding@resend.dev>",
+        to: Array.isArray(to) ? to : [to],
+        subject: subject || "Document",
+        html,
+      };
+      if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
+
+      const r = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + RESEND_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return jsonResponse({ error: (data && (data.message || data.name)) || ("Resend error " + r.status), detail: data }, r.status);
+      }
+      return jsonResponse({ ok: true, id: data.id });
+    } catch (e) {
+      return jsonResponse({ error: "send failed: " + (e instanceof Error ? e.message : String(e)) }, 500);
     }
   }
 
@@ -2834,16 +3245,6 @@ try {
   Deno.exit(1);
 }
 
-async function countFiles(dir: string): Promise<number> {
-  let n = 0;
-  for await (const entry of Deno.readDir(dir)) {
-    if (entry.isDirectory) n += await countFiles(join(dir, entry.name));
-    else if (entry.isFile && entry.name.endsWith(".md")) n++;
-  }
-  return n;
-}
-const fileCount = await countFiles(BASE_DIR);
-
 function tryPort(port: number): boolean {
   try {
     const listener = Deno.listen({ port, hostname: "127.0.0.1" });
@@ -2858,7 +3259,7 @@ let port = PREFERRED_PORT;
 while (!tryPort(port) && port < PREFERRED_PORT + 100) port++;
 
 console.log(`piranesi \u2192 http://localhost:${port}`);
-console.log(`  serving ${fileCount} files from ${BASE_DIR}`);
+console.log(`  serving from ${BASE_DIR}`);
 console.log(`  chat: ${ANTHROPIC_API_KEY ? 'Anthropic' : OPENAI_API_KEY ? 'OpenAI' : 'disabled (no API key)'}`);
 
 Deno.serve({ port, hostname: "127.0.0.1" }, handler);

@@ -1,0 +1,12 @@
+code_analysis_*.log
+
+# Secrets
+.env
+
+# Playwright MCP scratch output
+.playwright-mcp/
+
+# Scratch artifacts
+*.png
+SAMPLE.email
+TODO
