@@ -334,6 +334,17 @@ const LAYOUT_CSS = `
 .top-bar.fixed {
   position: fixed; top: 0; left: 0; right: 0; max-width: none;
 }
+.top-bar.read-hover {
+  position: fixed; top: 0; left: 0; right: 0; max-width: none;
+  transform: translateY(-100%); transition: transform 0.25s ease;
+  pointer-events: none;
+}
+.top-bar.read-hover.visible {
+  transform: translateY(0); pointer-events: auto;
+}
+.top-bar-hover-zone {
+  position: fixed; top: 0; left: 0; right: 0; height: 12px; z-index: 49;
+}
 .top-bar-spacer { height: 2.75rem; }
 .top-bar a { color: var(--fg2); text-decoration: none; font-size: 0.85rem; }
 .top-bar a:hover { color: var(--fg); }
@@ -527,6 +538,9 @@ const ANNOTATION_CSS = `
 .note-item.resolved .ni-comment { text-decoration: line-through; }
 /* Active/selected state */
 .note-item.editing { background: var(--code-bg); outline: 1px solid var(--accent); }
+/* Print-only annotation markers + endnotes — hidden on screen, shown in @media print */
+.print-ann-marker { display: none; }
+.print-annotations { display: none; }
 `;
 
 const INDEX_CSS = `
@@ -722,8 +736,47 @@ const PRINT_CSS = `
   /* Keep links as normal blue underlined links (force light-theme link color) */
   .prose a { color: #004c99; text-decoration: underline; }
 
-  /* Strip annotation highlights */
-  .annotated { background: none !important; outline: none !important; }
+  /* Keep annotation highlights in print, but force solid print-safe colors and
+     ensure browsers actually paint the background (print drops backgrounds otherwise). */
+  .annotated {
+    outline: none !important;
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+  }
+  .annotated[data-color="yellow"] { background: #fdf0c8 !important; }
+  .annotated[data-color="blue"]   { background: #d6e4fb !important; }
+  .annotated[data-color="green"]  { background: #d3f2de !important; }
+  .annotated[data-color="pink"]   { background: #fcdcec !important; }
+  .annotated[data-color="purple"] { background: #ece0fb !important; }
+  .annotated[data-color="orange"] { background: #fce4cf !important; }
+
+  /* Numbered superscript markers after each highlighted passage */
+  .print-ann-marker {
+    display: inline; font-size: 0.7em; line-height: 0; vertical-align: super;
+    color: #555; font-weight: 600; margin-left: 1px;
+  }
+
+  /* Endnotes section collecting every comment */
+  .print-annotations {
+    display: block; margin-top: 2.5rem; padding-top: 1rem;
+    border-top: 1px solid #ccc;
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+  }
+  .print-annotations .print-ann-title {
+    font-family: 'Inter', system-ui, sans-serif; font-size: 11pt; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin: 0 0 0.6rem;
+  }
+  .print-annotations ol { margin: 0 0 0 1.6rem; padding: 0; list-style: decimal; font-size: 10pt; color: #333; }
+  .print-annotations li { margin-bottom: 0.4rem; line-height: 1.45; page-break-inside: avoid; }
+  .print-ann-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 0.4rem; vertical-align: middle;
+  }
+  .print-ann-dot[data-color="yellow"] { background: #f5b800; }
+  .print-ann-dot[data-color="blue"]   { background: #3b82f6; }
+  .print-ann-dot[data-color="green"]  { background: #22c55e; }
+  .print-ann-dot[data-color="pink"]   { background: #f472b6; }
+  .print-ann-dot[data-color="purple"] { background: #a855f7; }
+  .print-ann-dot[data-color="orange"] { background: #fb923c; }
 
   /* Tables */
   .prose .table-wrap { overflow: visible; }
@@ -1143,6 +1196,74 @@ function applyOneAnnotation(container, ann, onClick) {
 
 function applyAnnotations(container, annotations, onClick) {
   annotations.forEach(ann => { if (!ann.resolved) applyOneAnnotation(container, ann, onClick); });
+  buildPrintAnnotations(container, annotations);
+}
+
+// Build a print-only endnotes section listing each annotation's comment, and
+// inject a numbered superscript marker after each highlighted passage. Both the
+// markers and the section are hidden on screen and only revealed in @media print.
+function buildPrintAnnotations(container, annotations) {
+  // Never inject into a contenteditable surface (the WYSIWYG editor) — its DOM
+  // is serialized back to markdown on save, and these print-only nodes must not
+  // leak into the document. Read view (#content) is the only target.
+  if (container.isContentEditable || container.getAttribute('contenteditable') === 'true') return;
+
+  // Clear anything from a previous render pass.
+  container.querySelectorAll('.print-ann-marker').forEach(el => el.remove());
+  const prev = container.querySelector('.print-annotations');
+  if (prev) prev.remove();
+
+  const byId = {};
+  annotations.forEach(ann => { if (ann && !ann.resolved) byId[ann.id] = ann; });
+
+  // Walk highlight spans in document order. A single annotation can be split
+  // across several spans (multiple text nodes / formatting boundaries). Number it
+  // once — on first sighting, so numbers follow reading order — but remember the
+  // LAST span so the marker lands at the end of the highlighted passage.
+  const spans = container.querySelectorAll('.annotated[data-ann-id]');
+  const seen = {};
+  const ordered = [];
+  const lastSpan = {};
+  spans.forEach(span => {
+    const id = span.dataset.annId;
+    if (id === '_pending' || !byId[id]) return;
+    if (!seen[id]) { seen[id] = true; ordered.push(byId[id]); }
+    lastSpan[id] = span; // spans iterate in document order, so this ends up the last
+  });
+  ordered.forEach((ann, i) => {
+    const span = lastSpan[ann.id];
+    const marker = document.createElement('sup');
+    marker.className = 'print-ann-marker';
+    marker.textContent = String(i + 1);
+    // Place the number right after the end of the highlighted passage.
+    span.parentNode.insertBefore(marker, span.nextSibling);
+  });
+
+  if (!ordered.length) return;
+
+  const aside = document.createElement('aside');
+  aside.className = 'print-annotations';
+  // Deliberately NOT an <h2>: the on-screen TOC builder scans #content for
+  // h1–h4, and a real heading here would show up as a phantom TOC entry.
+  const heading = document.createElement('div');
+  heading.className = 'print-ann-title';
+  heading.textContent = 'Annotations';
+  aside.appendChild(heading);
+  const ol = document.createElement('ol');
+  ordered.forEach(ann => {
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'print-ann-dot';
+    dot.dataset.color = ann.color || DEFAULT_ANN_COLOR;
+    li.appendChild(dot);
+    const comment = document.createElement('span');
+    comment.className = 'print-ann-comment';
+    comment.textContent = ann.comment || '(no comment)';
+    li.appendChild(comment);
+    ol.appendChild(li);
+  });
+  aside.appendChild(ol);
+  container.appendChild(aside);
 }
 
 function removePendingHighlights() {
@@ -1639,8 +1760,33 @@ function Breadcrumbs() {
 
 function TopBar({ mode, onSetMode, isDirty, autoSave, onSetAutoSave, onSave, conflictState, wordCount, readTime, theme, onToggleTheme }) {
   const isFixed = mode === 'raw' || mode === 'formatted';
+  const isRead = mode === 'read';
+
+  // In read mode: show hover bar when navbar has scrolled off and mouse is near top
+  const [hoverVisible, setHoverVisible] = useState(false);
+  const [scrolledPast, setScrolledPast] = useState(false);
+
+  useEffect(() => {
+    if (!isRead) { setScrolledPast(false); setHoverVisible(false); return; }
+    const onScroll = () => {
+      setScrolledPast(window.scrollY > 50);
+      if (window.scrollY <= 50) setHoverVisible(false);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [isRead]);
+
+  const showHover = isRead && scrolledPast;
+
+  const barClass = isFixed ? 'top-bar fixed'
+    : showHover ? 'top-bar read-hover' + (hoverVisible ? ' visible' : '')
+    : 'top-bar';
+
   return html\`
-    <div class=\${'top-bar' + (isFixed ? ' fixed' : '')}>
+    \${showHover ? html\`<div class="top-bar-hover-zone"
+      onMouseEnter=\${() => setHoverVisible(true)} />\` : null}
+    <div class=\${barClass}
+      onMouseLeave=\${showHover ? () => setHoverVisible(false) : null}>
       <div class="top-left">
         <\${Breadcrumbs} />
         <span class="word-count">\${wordCount > 0 ? wordCount.toLocaleString() + ' words' : ''}</span>
@@ -2778,7 +2924,9 @@ function DocApp() {
   });
 
   // Mode switching
+  const pendingScrollRef = useRef(null);
   const setMode = useCallback((newMode) => {
+    pendingScrollRef.current = window.scrollY;
     // Extract content from previous mode
     if (mode === 'formatted' && newMode !== 'formatted') {
       setMarkdown(htmlToMarkdown(document.getElementById('formatted-editor')));
@@ -2788,6 +2936,17 @@ function DocApp() {
     setModeState(newMode);
     setRenderVersion(v => v + 1);
     setTocVersion(v => v + 1);
+  }, [mode]);
+
+  // Restore scroll position after mode switch
+  useEffect(() => {
+    if (pendingScrollRef.current != null) {
+      const y = pendingScrollRef.current;
+      pendingScrollRef.current = null;
+      document.documentElement.style.scrollBehavior = 'auto';
+      window.scrollTo(0, y);
+      document.documentElement.style.scrollBehavior = '';
+    }
   }, [mode]);
 
   // Note actions — bump renderVersion to re-apply highlights
