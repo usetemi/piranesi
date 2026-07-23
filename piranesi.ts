@@ -98,9 +98,10 @@ const PROSE_CSS = `
 .prose a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; transition: text-decoration-color 0.15s; }
 .prose a:hover { text-decoration-color: transparent; }
 .prose a.broken-link { color: var(--red, #c33); text-decoration-color: var(--red, #c33); opacity: 0.85; }
-.prose strong { font-weight: 600; letter-spacing: -0.005em; }
-.prose em { font-style: italic; }
+.prose strong, .prose .print-strong { font-weight: 600; letter-spacing: -0.005em; }
+.prose em, .prose .print-em { font-style: italic; }
 .prose a.section-ref { color: inherit; text-decoration: none; cursor: pointer; }
+.prose a.section-ref.print-section-ref { color: #000 !important; text-decoration: none !important; }
 .prose a.section-ref:hover { color: var(--accent); text-decoration: underline; }
 .prose .section-ref-sym { font-style: normal; color: var(--accent); font-size: 0.85em; vertical-align: baseline; position: relative; top: -0.05em; }
 .prose ul, .prose ol { margin: 0.4rem 0 0.85rem 1.5rem; }
@@ -214,7 +215,8 @@ const PROSE_CSS = `
   font-family: 'Lora', Georgia, serif; font-size: 3.2em; font-weight: 600;
   float: left; line-height: 0.8; margin: 0.1em 0.12em 0 0; color: var(--accent);
 }
-.prose strong em, .prose em strong { color: var(--accent); }
+.prose strong em, .prose em strong,
+.prose .print-strong .print-em, .prose .print-em .print-strong { color: var(--accent); }
 /* Footnotes */
 .prose .footnote-ref { font-size: 0.75em; text-decoration: none; color: var(--accent); font-weight: 600; }
 .prose .footnote-ref:hover { text-decoration: underline; }
@@ -1197,6 +1199,33 @@ function applyOneAnnotation(container, ann, onClick) {
 function applyAnnotations(container, annotations, onClick) {
   annotations.forEach(ann => { if (!ann.resolved) applyOneAnnotation(container, ann, onClick); });
   buildPrintAnnotations(container, annotations);
+}
+
+function replacePrintEmphasis(container) {
+  const replacements = [];
+  container.querySelectorAll('strong, em').forEach(original => {
+    const isStrong = original.tagName === 'STRONG';
+    const replacement = document.createElement(isStrong ? 'b' : 'i');
+    for (const attribute of original.attributes) {
+      replacement.setAttribute(attribute.name, attribute.value);
+    }
+    replacement.classList.add(isStrong ? 'print-strong' : 'print-em');
+    while (original.firstChild) replacement.appendChild(original.firstChild);
+    const sectionLink = !isStrong ? original.closest('a.section-ref') : null;
+    original.replaceWith(replacement);
+    if (sectionLink) sectionLink.classList.add('print-section-ref');
+    replacements.push({ original, replacement, sectionLink });
+  });
+  return replacements;
+}
+
+function restorePrintEmphasis(replacements) {
+  for (let i = replacements.length - 1; i >= 0; i--) {
+    const { original, replacement, sectionLink } = replacements[i];
+    while (replacement.firstChild) original.appendChild(replacement.firstChild);
+    replacement.replaceWith(original);
+    if (sectionLink) sectionLink.classList.remove('print-section-ref');
+  }
 }
 
 // Build a print-only endnotes section listing each annotation's comment, and
@@ -2197,6 +2226,26 @@ function ReadView({ markdown, notes, onHighlightClick, renderVersion }) {
     checkBrokenLinks(ref.current);
     applyAnnotations(ref.current, notes, onHighlightClick);
   }, [markdown, notes, renderVersion]);
+  useEffect(() => {
+    let replacements = null;
+    const beforePrint = () => {
+      const container = ref.current;
+      if (replacements !== null || !container || container.isContentEditable) return;
+      replacements = replacePrintEmphasis(container);
+    };
+    const afterPrint = () => {
+      if (replacements === null) return;
+      restorePrintEmphasis(replacements);
+      replacements = null;
+    };
+    window.addEventListener('beforeprint', beforePrint);
+    window.addEventListener('afterprint', afterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', beforePrint);
+      window.removeEventListener('afterprint', afterPrint);
+      afterPrint();
+    };
+  }, []);
   return html\`<article class="prose" id="content" ref=\${ref}></article>\`;
 }
 
